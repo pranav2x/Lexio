@@ -1,4 +1,4 @@
-# Narrate Web
+# Lexio
 
 A modern web application built with Next.js 15, TypeScript, and Tailwind CSS, featuring responsive design, dark mode support, and clean minimal styling.
 
@@ -86,7 +86,7 @@ npm start
 ## 🌐 Using the Application
 
 1. **Enter a URL** - Paste any website URL into the input field
-2. **Click "Narrate This Site"** - The app will scrape the website content
+2. **Click "Read This Site"** - The app will scrape the website content
 3. **Read the Content** - View the extracted content in a clean, readable format
 4. **Dark Mode** - Toggle between light and dark themes using the button in the top-right
 
@@ -98,7 +98,7 @@ npm start
 ## 📁 Project Structure
 
 ```
-narrate-web/
+lexio/
 ├── src/
 │   ├── app/
 │   │   ├── globals.css       # Global styles and CSS variables

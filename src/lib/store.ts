@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { ScrapeResult } from './firecrawl';
 
-interface NarrateState {
+interface LexioState {
   // Current scraped data
   scrapedData: ScrapeResult | null;
   
@@ -20,7 +20,7 @@ interface NarrateState {
   clearAll: () => void;
 }
 
-export const useNarrateStore = create<NarrateState>((set) => ({
+export const useLexioStore = create<LexioState>((set) => ({
   // Initial state
   scrapedData: null,
   isLoading: false,
@@ -41,13 +41,13 @@ export const useNarrateStore = create<NarrateState>((set) => ({
 }));
 
 // Helper hook for easy access to store actions
-export const useNarrateActions = () => {
-  const { setScrapedData, setLoading, setError, setCurrentUrl, clearAll } = useNarrateStore();
+export const useLexioActions = () => {
+  const { setScrapedData, setLoading, setError, setCurrentUrl, clearAll } = useLexioStore();
   return { setScrapedData, setLoading, setError, setCurrentUrl, clearAll };
 };
 
 // Helper hook for easy access to store state
-export const useNarrateState = () => {
-  const { scrapedData, isLoading, error, currentUrl } = useNarrateStore();
+export const useLexioState = () => {
+  const { scrapedData, isLoading, error, currentUrl } = useLexioStore();
   return { scrapedData, isLoading, error, currentUrl };
 }; 

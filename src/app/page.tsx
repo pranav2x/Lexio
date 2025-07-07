@@ -3,16 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { scrapeWebsite, isValidUrl } from "@/lib/firecrawl";
-import { useNarrateActions, useNarrateState } from "@/lib/store";
+import { useLexioActions, useLexioState } from "@/lib/store";
 
 export default function Home() {
   const [url, setUrl] = useState("");
   const [useLLMExtraction, setUseLLMExtraction] = useState(true);
   const router = useRouter();
-  const { setScrapedData, setLoading, setError, setCurrentUrl } = useNarrateActions();
-  const { isLoading, error } = useNarrateState();
+  const { setScrapedData, setLoading, setError, setCurrentUrl } = useLexioActions();
+  const { isLoading, error } = useLexioState();
 
-  const handleNarrate = async (e: React.FormEvent) => {
+  const handleLexio = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!url.trim()) {
@@ -46,7 +46,7 @@ export default function Home() {
         <div className="text-center mb-12">
           <h1 className="text-4xl sm:text-5xl font-bold text-foreground mb-4">
             <span className="bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-              Narrate Web
+              Lexio
             </span>
           </h1>
           <p className="text-lg text-muted-foreground">
@@ -54,7 +54,7 @@ export default function Home() {
           </p>
         </div>
 
-        <form onSubmit={handleNarrate} className="space-y-6">
+        <form onSubmit={handleLexio} className="space-y-6">
           <div className="relative">
             <input
               type="url"
@@ -73,26 +73,35 @@ export default function Home() {
             )}
           </div>
 
-          {/* LLM Extraction Toggle */}
-          <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg border border-border">
-            <div className="flex-1">
-              <label htmlFor="llm-toggle" className="text-sm font-medium text-foreground">
-                🤖 AI-Enhanced Text Extraction
-              </label>
-              <p className="text-xs text-muted-foreground mt-1">
-                Uses AI to clean and optimize text for better speech synthesis
-              </p>
+          {/* AI Enhancement Toggle */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">🤖 AI Enhancement</span>
+              <div className="group relative">
+                <svg className="w-4 h-4 text-muted-foreground hover:text-foreground transition-colors cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                  <path d="M12 17h.01"/>
+                </svg>
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
+                  Cleans text for better narration
+                </div>
+              </div>
             </div>
-            <div className="flex items-center">
-              <input
-                id="llm-toggle"
-                type="checkbox"
-                checked={useLLMExtraction}
-                onChange={(e) => setUseLLMExtraction(e.target.checked)}
-                className="w-4 h-4 text-primary bg-background border-border rounded focus:ring-primary focus:ring-2"
-                disabled={isLoading}
+            <button
+              type="button"
+              onClick={() => setUseLLMExtraction(!useLLMExtraction)}
+              disabled={isLoading}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                useLLMExtraction ? 'bg-primary' : 'bg-gray-200 dark:bg-gray-700'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  useLLMExtraction ? 'translate-x-6' : 'translate-x-1'
+                }`}
               />
-            </div>
+            </button>
           </div>
 
           {error && (
@@ -121,7 +130,7 @@ export default function Home() {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
                 </svg>
-                <span>Narrate This Site</span>
+                <span>Read This Site</span>
               </>
             )}
           </button>

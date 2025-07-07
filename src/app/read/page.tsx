@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { useNarrateState, useNarrateActions } from "@/lib/store";
+import { useLexioState, useLexioActions } from "@/lib/store";
 import { extractSummary } from "@/lib/firecrawl";
 import { generateSpeech, cleanupAudioUrl, estimateTextDuration } from "@/lib/tts";
 
@@ -18,8 +18,8 @@ type PlayingSection = 'summary' | 'full' | `section-${number}` | null;
 
 export default function ReadPage() {
   const router = useRouter();
-  const { scrapedData, currentUrl } = useNarrateState();
-  const { clearAll } = useNarrateActions();
+  const { scrapedData, currentUrl } = useLexioState();
+  const { clearAll } = useLexioActions();
   
   // Audio state
   const [audioUrl, setAudioUrl] = useState<string | null>(null);

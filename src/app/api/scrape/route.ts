@@ -8,6 +8,7 @@ import { FirecrawlRequest, FirecrawlResponse, ScrapeResult } from '@/lib/firecra
 export async function POST(request: NextRequest) {
   try {
     // Validate API key on server-side
+    console.log('FIRECRAWL_API_KEY', process.env.FIRECRAWL_API_KEY);
     const apiKey = process.env.FIRECRAWL_API_KEY;
     if (!apiKey) {
       return NextResponse.json(

@@ -14,10 +14,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Narrate Web",
+  title: "Lexio",
   description: "A modern web application built with Next.js, TypeScript, and Tailwind CSS",
   keywords: ["Next.js", "TypeScript", "Tailwind CSS", "React"],
-  authors: [{ name: "Narrate Web Team" }],
+  authors: [{ name: "Lexio Team" }],
 };
 
 export const viewport: Viewport = {
