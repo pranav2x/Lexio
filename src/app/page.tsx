@@ -1,173 +1,135 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function LandingPage() {
   const router = useRouter();
-  const [isVisible, setIsVisible] = useState(false);
-
+  
+  // Typewriter effect state
+  const [displayText, setDisplayText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  
+  const targetText = "lexio.";
+  
   useEffect(() => {
-    // Trigger animations on mount
-    const timer = setTimeout(() => setIsVisible(true), 100);
-    return () => clearTimeout(timer);
-  }, []);
+    const typewriterInterval = setInterval(() => {
+      if (!isDeleting && currentIndex < targetText.length) {
+        // Typing mode
+        setDisplayText(targetText.substring(0, currentIndex + 1));
+        setCurrentIndex(currentIndex + 1);
+      } else if (!isDeleting && currentIndex === targetText.length) {
+        // Pause before deleting
+        setTimeout(() => setIsDeleting(true), 2000);
+      } else if (isDeleting && currentIndex > 0) {
+        // Deleting mode
+        setDisplayText(targetText.substring(0, currentIndex - 1));
+        setCurrentIndex(currentIndex - 1);
+      } else if (isDeleting && currentIndex === 0) {
+        // Pause before typing again
+        setIsDeleting(false);
+        setTimeout(() => {}, 1000);
+      }
+    }, isDeleting ? 100 : 150); // Faster when deleting, slower when typing
 
-  const handleGetStarted = () => {
-    router.push("/app");
-  };
+    return () => clearInterval(typewriterInterval);
+  }, [currentIndex, isDeleting, targetText]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-slate-800 relative overflow-hidden">
-      {/* Animated background elements */}
-      <div className="absolute inset-0">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl animate-pulse delay-1000" />
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-radial from-blue-500/5 to-transparent rounded-full" />
-      </div>
-
+    <div className="min-h-screen bg-white text-black font-sans">
       {/* Main content */}
-      <div className="relative z-10 min-h-screen flex flex-col">
+      <div className="min-h-screen flex flex-col">
         {/* Hero section */}
-        <main className="flex-1 flex items-center justify-center px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-4xl mx-auto">
-            {/* Main heading with animation */}
-            <div
-              className={`transform transition-all duration-1000 ease-out ${
-                isVisible
-                  ? "translate-y-0 opacity-100"
-                  : "translate-y-8 opacity-0"
-              }`}
-            >
-              <h1 className="text-7xl sm:text-8xl lg:text-9xl font-bold text-white mb-8 tracking-tight">
-                <span className="bg-gradient-to-r from-blue-400 via-purple-400 to-blue-300 bg-clip-text text-transparent">
-                  Lexio
-                </span>
-              </h1>
-            </div>
+        <main className="flex-1 flex items-center justify-center px-6">
+          <div className="max-w-[700px] mx-auto text-center space-y-12">
+            {/* Main heading */}
+            <h1 className="text-6xl sm:text-7xl font-medium tracking-tight">
+              {displayText}
+              <span className="animate-pulse">|</span>
+            </h1>
 
-            {/* Subheading with animation */}
-            <div
-              className={`transform transition-all duration-1000 ease-out delay-300 ${
-                isVisible
-                  ? "translate-y-0 opacity-100"
-                  : "translate-y-8 opacity-0"
-              }`}
-            >
-              <p className="text-xl sm:text-2xl lg:text-3xl text-gray-300 mb-12 max-w-prose mx-auto leading-relaxed font-light">
-                Turn any website into an immersive audio experience.
-              </p>
-            </div>
-
-            {/* CTA button with animation */}
-            <div
-              className={`transform transition-all duration-1000 ease-out delay-500 ${
-                isVisible
-                  ? "translate-y-0 opacity-100 scale-100"
-                  : "translate-y-8 opacity-0 scale-95"
-              }`}
-            >
-              <button
-                onClick={handleGetStarted}
-                className="group relative inline-flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-lg font-semibold rounded-2xl hover:from-blue-500 hover:to-purple-500 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/25 focus:outline-none focus:ring-4 focus:ring-blue-500/50"
-              >
-                <span>Try Lexio Now</span>
-                <svg
-                  className="w-5 h-5 transition-transform duration-300 group-hover:translate-x-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+            {/* Content paragraphs */}
+            <div className="space-y-6 text-lg leading-relaxed">
+              <p className="text-gray-600">
+                transform any webpage into natural, flowing speech with intelligent text extraction and high-quality voice synthesis — 
+                <a 
+                  href="/app" 
+                  className="text-black hover:underline transition-all duration-200"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M13 7l5 5m0 0l-5 5m5-5H6"
-                  />
-                </svg>
-                
-                {/* Button glow effect */}
-                <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-blue-600 to-purple-600 opacity-0 group-hover:opacity-20 transition-opacity duration-300 blur-xl" />
-              </button>
-            </div>
-
-            {/* Feature highlights */}
-            <div
-              className={`transform transition-all duration-1000 ease-out delay-700 ${
-                isVisible
-                  ? "translate-y-0 opacity-100"
-                  : "translate-y-8 opacity-0"
-              }`}
-            >
-              <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-8 max-w-3xl mx-auto">
-                <div className="text-center">
-                  <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9-9a9 9 0 00-9-9m9 9c0 5-4 9-9 9s-9-4-9-9 4-9 9-9 9 4 9 9z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-sm font-medium text-white mb-2">Any Website</h3>
-                  <p className="text-xs text-gray-400">Works with any web page or article</p>
-                </div>
-                
-                <div className="text-center">
-                  <div className="w-12 h-12 bg-purple-500/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-sm font-medium text-white mb-2">AI-Enhanced</h3>
-                  <p className="text-xs text-gray-400">Smart text extraction and optimization</p>
-                </div>
-                
-                <div className="text-center">
-                  <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-sm font-medium text-white mb-2">High Quality</h3>
-                  <p className="text-xs text-gray-400">Natural-sounding voice synthesis</p>
-                </div>
-              </div>
+                  try now
+                </a>
+              </p>
+              
+              <p className="text-gray-600">
+                perfect for consuming long-form content, research papers, or articles while multitasking or on the go — 
+                <a 
+                  href="/about" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    router.push("/about");
+                  }}
+                  className="text-black hover:underline transition-all duration-200"
+                >
+                  learn more
+                </a>
+              </p>
+              
+              <p className="text-gray-600">
+                built with privacy in mind, processing content temporarily without permanent storage or tracking — 
+                <a 
+                  href="/privacy"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    router.push("/privacy");
+                  }}
+                  className="text-black hover:underline transition-all duration-200"
+                >
+                  see details
+                </a>
+              </p>
             </div>
           </div>
         </main>
 
         {/* Footer */}
-        <footer
-          className={`transform transition-all duration-1000 ease-out delay-1000 ${
-            isVisible
-              ? "translate-y-0 opacity-100"
-              : "translate-y-4 opacity-0"
-          }`}
-        >
-          <div className="px-4 py-8">
-            <div className="max-w-4xl mx-auto text-center">
-              <div className="flex items-center justify-center gap-6 text-sm text-gray-500">
-                <a
-                  href="https://github.com/pranav2x"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-gray-300 transition-colors duration-200"
-                >
-                  GitHub
-                </a>
-                <span className="w-1 h-1 bg-gray-600 rounded-full" />
-                <button
-                  onClick={() => router.push("/about")}
-                  className="hover:text-gray-300 transition-colors duration-200"
-                >
-                  About
-                </button>
-                <span className="w-1 h-1 bg-gray-600 rounded-full" />
-                <button
-                  onClick={() => router.push("/privacy")}
-                  className="hover:text-gray-300 transition-colors duration-200"
-                >
-                  Privacy
-                </button>
-              </div>
+        <footer className="sticky bottom-0 bg-white border-t border-gray-100">
+          <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div className="text-sm text-gray-400">
+              lexio © 2025
+            </div>
+            
+            <div className="flex items-center gap-6">
+              <a
+                href="https://github.com/pranav2x"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+                </svg>
+              </a>
+              
+              <a
+                href="https://www.linkedin.com/in/pranav-rapelli-0161312a4/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                </svg>
+              </a>
+
+              <a
+                href="mailto:rapellipranav1@gmail.com"
+                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                </svg>
+              </a>
             </div>
           </div>
         </footer>
