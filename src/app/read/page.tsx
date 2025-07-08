@@ -387,7 +387,7 @@ export default function ReadPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-secondary/20">
+    <div className="min-h-screen bg-white text-black [&_*]:text-black">
       {/* Hidden Audio Element */}
       {audioUrl && (
         <audio
@@ -568,8 +568,8 @@ export default function ReadPage() {
       </div>
 
       {/* Main Content */}
-      <main ref={contentRef} className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="max-w-4xl mx-auto">
+      <main ref={contentRef} className="container mx-auto px-6 py-8">
+        <div className="max-w-[700px] mx-auto">
           {/* Article Header */}
           <div className="mb-8">
             <div className="prose prose-lg prose-gray dark:prose-invert max-w-none">
