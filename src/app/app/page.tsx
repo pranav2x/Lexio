@@ -7,24 +7,76 @@ import { useLexioActions, useLexioState } from "@/lib/store";
 
 // Developer mode hardcoded data
 const DEVELOPER_MODE_DATA = {
-  title: "Relentlessly Resourceful",
-  url: "https://paulgraham.com/relres.html",
-  text: `March 2009 A couple days ago I finally got being a good startup founder down to two words: relentlessly resourceful. Till then the best I'd managed was to get the opposite quality down to one: hapless. Most dictionaries say hapless means unlucky. But the dictionaries are not doing a very good job. A team that outplays its opponents but loses because of a bad decision by the referee could be called unlucky, but not hapless. Hapless implies passivity. To be hapless is to be battered by circumstances — to let the world have its way with you, instead of having your way with the world. [1] Unfortunately there's no antonym of hapless, which makes it difficult to tell founders what to aim for. "Don't be hapless" is not much of a rallying cry. It's not hard to express the quality we're looking for in metaphors. The best is probably a running back. A good running back is not merely determined, but flexible as well. They want to get downfield, but they adapt their plans on the fly. Unfortunately this is just a metaphor, and not a useful one to most people outside the US. "Be like a running back" is no better than "Don't be hapless." But finally I've figured out how to express this quality directly. I was writing a talk for investors, and I had to explain what to look for in founders. What would someone who was the opposite of hapless be like? They'd be relentlessly resourceful. Not merely relentless. That's not enough to make things go your way except in a few mostly uninteresting domains. In any interesting domain, the difficulties will be novel. Which means you can't simply plow through them, because you don't know initially how hard they are; you don't know whether you're about to plow through a block of foam or granite. So you have to be resourceful. You have to keep trying new things. Be relentlessly resourceful. That sounds right, but is it simply a description of how to be successful in general? I don't think so. This isn't the recipe for success in writing or painting, for example. In that kind of work the recipe is more to be actively curious. Resourceful implies the obstacles are external, which they generally are in startups. But in writing and painting they're mostly internal; the obstacle is your own obtuseness. [2] There probably are other fields where "relentlessly resourceful" is the recipe for success. But though other fields may share it, I think this is the best short description we'll find of what makes a good startup founder. I doubt it could be made more precise. Now that we know what we're looking for, that leads to other questions. For example, can this quality be taught? After four years of trying to teach it to people, I'd say that yes, surprisingly often it can. Not to everyone, but to many people. [3] Some people are just constitutionally passive, but others have a latent ability to be relentlessly resourceful that only needs to be brought out. This is particularly true of young people who have till now always been under the thumb of some kind of authority. Being relentlessly resourceful is definitely not the recipe for success in big companies, or in most schools. I don't even want to think what the recipe is in big companies, but it is certainly longer and messier, involving some combination of resourcefulness, obedience, and building alliances. Identifying this quality also brings us closer to answering a question people often wonder about: how many startups there could be. There is not, as some people seem to think, any economic upper bound on this number. There's no reason to believe there is any limit on the amount of newly created wealth consumers can absorb, any more than there is a limit on the number of theorems that can be proven. So probably the limiting factor on the number of startups is the pool of potential founders. Some people would make good founders, and others wouldn't. And now that we can say what makes a good founder, we know how to put an upper bound on the size of the pool. This test is also useful to individuals. If you want to know whether you're the right sort of person to start a startup, ask yourself whether you're relentlessly resourceful. And if you want to know whether to recruit someone as a cofounder, ask if they are. You can even use it tactically. If I were running a startup, this would be the phrase I'd tape to the mirror. "Make something people want" is the destination, but "Be relentlessly resourceful" is how you get there. Notes [1] I think the reason the dictionaries are wrong is that the meaning of the word has shifted. No one writing a dictionary from scratch today would say that hapless meant unlucky. But a couple hundred years ago they might have. People were more at the mercy of circumstances in the past, and as a result a lot of the words we use for good and bad outcomes have origins in words about luck. When I was living in Italy, I was once trying to tell someone that I hadn't had much success in doing something, but I couldn't think of the Italian word for success. I spent some time trying to describe the word I meant. Finally she said "Ah! Fortuna!" [2] There are aspects of startups where the recipe is to be actively curious. There can be times when what you're doing is almost pure discovery. Unfortunately these times are a small proportion of the whole. On the other hand, they are in research too. [3] I'd almost say to most people, but I realize (a) I have no idea what most people are like, and (b) I'm pathologically optimistic about people's ability to change. Thanks to Trevor Blackwell and Jessica Livingston for reading drafts of this.`,
-  cleanText: `A couple days ago I finally got being a good startup founder down to two words: relentlessly resourceful. Till then the best I'd managed was to get the opposite quality down to one: hapless. Most dictionaries say hapless means unlucky. But the dictionaries are not doing a very good job. A team that outplays its opponents but loses because of a bad decision by the referee could be called unlucky, but not hapless. Hapless implies passivity. To be hapless is to be battered by circumstances, to let the world have its way with you, instead of having your way with the world. Unfortunately there's no antonym of hapless, which makes it difficult to tell founders what to aim for. Don't be hapless is not much of a rallying cry. It's not hard to express the quality we're looking for in metaphors. The best is probably a running back. A good running back is not merely determined, but flexible as well. They want to get downfield, but they adapt their plans on the fly. Unfortunately this is just a metaphor, and not a useful one to most people outside the US. Be like a running back is no better than Don't be hapless. But finally I've figured out how to express this quality directly. I was writing a talk for investors, and I had to explain what to look for in founders. What would someone who was the opposite of hapless be like? They'd be relentlessly resourceful. Not merely relentless. That's not enough to make things go your way except in a few mostly uninteresting domains. In any interesting domain, the difficulties will be novel. Which means you can't simply plow through them, because you don't know initially how hard they are. You don't know whether you're about to plow through a block of foam or granite. So you have to be resourceful. You have to keep trying new things. Be relentlessly resourceful. That sounds right, but is it simply a description of how to be successful in general? I don't think so. This isn't the recipe for success in writing or painting, for example. In that kind of work the recipe is more to be actively curious. Resourceful implies the obstacles are external, which they generally are in startups. But in writing and painting they're mostly internal. The obstacle is your own obtuseness. There probably are other fields where relentlessly resourceful is the recipe for success. But though other fields may share it, I think this is the best short description we'll find of what makes a good startup founder. I doubt it could be made more precise. Now that we know what we're looking for, that leads to other questions. For example, can this quality be taught? After four years of trying to teach it to people, I'd say that yes, surprisingly often it can. Not to everyone, but to many people. Some people are just constitutionally passive, but others have a latent ability to be relentlessly resourceful that only needs to be brought out. This is particularly true of young people who have till now always been under the thumb of some kind of authority. Being relentlessly resourceful is definitely not the recipe for success in big companies, or in most schools. I don't even want to think what the recipe is in big companies, but it is certainly longer and messier, involving some combination of resourcefulness, obedience, and building alliances.`,
+  title: "AP World History: Modern Period 1 Notes (1200-1450)",
+  url: "https://www.kaptest.com/study/ap-world-history/ap-world-history-modern-period-1-notes-1200-1450/",
+  text: `The period from 1200 to 1450 CE represents a crucial era in world history known as the Post-Classical Period. This era witnessed unprecedented expansion of trade networks, the rise of powerful new empires, and significant cultural exchanges across Afro-Eurasia. Understanding this period is essential for AP World History: Modern success, as it establishes foundational patterns that continue into later periods.
+
+Key Characteristics of Period 1 (1200-1450):
+The Post-Classical Period is characterized by several major trends that shaped global development. First, expanded trade networks connected previously isolated regions, creating the first truly global economy. The Silk Road reached its peak efficiency under Mongol protection, while new maritime routes linked the Indian Ocean basin. Second, powerful new empires emerged, including the Mongol Empire, various Islamic states, and the Ming Dynasty in China. Third, significant cultural and technological exchanges occurred as merchants, missionaries, and travelers spread ideas, religions, and innovations across vast distances.
+
+The Islamic World and Expansion:
+Islamic civilization experienced tremendous growth and influence during this period. The Abbasid Caliphate, centered in Baghdad, became a major center of learning and trade. Islamic traders and missionaries spread Islam throughout Africa, Southeast Asia, and parts of Europe. The concept of Dar al-Islam (the realm of Islam) created a unified cultural sphere that facilitated trade and cultural exchange. Major Islamic empires included the Ottoman Empire in the Eastern Mediterranean, the Safavid Empire in Persia, and various sultanates in India and Southeast Asia.
+
+The Mongol Empire and Its Impact:
+The Mongol Empire, established by Genghis Khan in the early 13th century, became the largest contiguous land empire in history. Under Mongol rule, the Pax Mongolica (Mongol Peace) facilitated unprecedented trade and cultural exchange along the Silk Road. The Mongols conquered China, establishing the Yuan Dynasty, and extended their influence into the Middle East and Eastern Europe. Despite their reputation for destruction, the Mongols often adopted local customs and promoted religious tolerance, creating a unique synthesis of cultures across their vast empire.
+
+Trade Networks and Economic Development:
+Trade networks expanded dramatically during this period, connecting Europe, Asia, and Africa in complex commercial relationships. The Silk Road continued to be the primary overland trade route, while maritime trade in the Indian Ocean basin flourished. New trading cities emerged, including Malacca, Venice, and various Swahili city-states along the East African coast. These networks facilitated not only the exchange of goods but also the spread of technologies, ideas, and diseases. The development of new financial instruments, such as bills of exchange and banking houses, supported long-distance trade.
+
+Technological and Cultural Innovations:
+This period saw remarkable technological and cultural achievements. Chinese innovations, including gunpowder, the compass, and printing technology, spread westward along trade routes. Islamic scholars made significant advances in mathematics, astronomy, and medicine. The establishment of universities in Europe and madrasas in the Islamic world promoted learning and scholarship. Architecture flourished, with the construction of magnificent mosques, cathedrals, and palaces that still stand today.
+
+Social and Political Structures:
+Social hierarchies remained largely intact during this period, with most societies organized around agricultural production and ruled by monarchical or imperial systems. The feudal system dominated Europe, while China maintained its bureaucratic imperial structure under the Song and later Ming dynasties. Labor systems varied by region but generally included various forms of free and coerced labor, including serfdom and slavery. The period also saw the continuation and sometimes intensification of patriarchal structures across most societies.
+
+Environmental and Demographic Changes:
+The period experienced significant environmental and demographic changes. The Medieval Warm Period (roughly 900-1300 CE) facilitated agricultural expansion and population growth. However, the Little Ice Age began around 1300, contributing to crop failures and social unrest. The most devastating demographic event was the Black Death (1347-1351), which killed an estimated one-third of Europe's population and had significant impacts throughout Afro-Eurasia. These changes forced societies to adapt their agricultural practices and social structures.
+
+Regional Developments:
+Different regions experienced unique developments during this period. In Europe, the rise of powerful monarchies and the growth of towns and universities marked the transition from the early medieval period. China saw the flourishing of the Song Dynasty, known for its technological innovations and economic prosperity, followed by Mongol conquest and the eventual establishment of the Ming Dynasty. Africa experienced the rise of powerful trading kingdoms, including Mali and Songhai, while the Americas saw the development of sophisticated civilizations like the Aztec and Inca empires.
+
+Religious and Cultural Exchange:
+The period was marked by significant religious and cultural exchange. Islam continued to spread through trade and conquest, while Buddhism expanded throughout East and Southeast Asia. Christianity saw both expansion and internal division, with the Great Schism between Eastern and Western Christianity. The period also witnessed increased interaction between different religious and cultural traditions, leading to syncretism and the development of new forms of artistic and intellectual expression.
+
+Legacy and Historical Significance:
+The developments of the 1200-1450 period established patterns that would shape the modern world. The trade networks created during this era laid the foundation for the global economy that emerged in subsequent periods. The cultural exchanges facilitated by these networks contributed to the Renaissance in Europe and continued technological advancement in Asia. The political structures and social systems developed during this time influenced governance and society for centuries to come. Understanding this period is crucial for comprehending how the modern world system emerged from medieval foundations.`,
+  cleanText: `The period from 1200 to 1450 CE represents the Post-Classical Period in world history, characterized by expanded trade networks, powerful new empires, and significant cultural exchanges across Afro-Eurasia. This era established foundational patterns crucial for understanding later historical developments.
+
+Key developments include the rise of the Mongol Empire, which created the largest contiguous land empire in history and facilitated unprecedented trade along the Silk Road through the Pax Mongolica. Islamic civilization experienced tremendous growth, with the Abbasid Caliphate becoming a major center of learning and Islamic traders spreading their religion throughout Africa and Southeast Asia.
+
+Trade networks expanded dramatically, connecting Europe, Asia, and Africa through both overland routes like the Silk Road and maritime trade in the Indian Ocean basin. These networks facilitated the exchange of goods, technologies, ideas, and diseases, while new financial instruments supported long-distance commerce.
+
+Technological innovations flourished, with Chinese inventions like gunpowder, the compass, and printing spreading westward. Islamic scholars advanced mathematics, astronomy, and medicine, while universities and madrasas promoted learning across different regions.
+
+The period also witnessed significant environmental and demographic changes, including the Medieval Warm Period, the beginning of the Little Ice Age, and the devastating Black Death pandemic that killed one-third of Europe's population.
+
+Different regions experienced unique developments: Europe transitioned from early medieval structures to powerful monarchies and growing towns; China saw the Song Dynasty's prosperity followed by Mongol conquest and Ming establishment; Africa experienced powerful trading kingdoms like Mali; and the Americas developed sophisticated civilizations.
+
+Religious and cultural exchange marked the era, with Islam spreading through trade and conquest, Buddhism expanding in East and Southeast Asia, and increased interaction between different traditions leading to syncretism and new forms of expression. These developments established patterns that shaped the emergence of the modern world system.`,
   sections: [
     {
-      title: "The Definition",
-      content: "A couple days ago I finally got being a good startup founder down to two words: relentlessly resourceful. Till then the best I'd managed was to get the opposite quality down to one: hapless. Most dictionaries say hapless means unlucky. But the dictionaries are not doing a very good job. A team that outplays its opponents but loses because of a bad decision by the referee could be called unlucky, but not hapless. Hapless implies passivity. To be hapless is to be battered by circumstances, to let the world have its way with you, instead of having your way with the world.",
+      title: "Trade Networks and Economic Development",
+      content: "Trade networks expanded dramatically during the period 1200-1450, connecting Europe, Asia, and Africa in complex commercial relationships. The Silk Road continued as the primary overland trade route, reaching peak efficiency under Mongol protection through the Pax Mongolica. Maritime trade in the Indian Ocean basin flourished, linking East Africa, the Middle East, India, Southeast Asia, and China. New trading cities emerged as crucial commercial hubs, including Malacca in Southeast Asia, Venice in Europe, and various Swahili city-states along the East African coast. These networks facilitated not only the exchange of luxury goods like silk, spices, and precious metals, but also the spread of technologies, ideas, religions, and unfortunately, diseases. The development of new financial instruments, such as bills of exchange, credit systems, and banking houses, supported the growing complexity of long-distance trade and commerce.",
       level: 1
     },
     {
-      title: "The Problem with Metaphors",
-      content: "Unfortunately there's no antonym of hapless, which makes it difficult to tell founders what to aim for. Don't be hapless is not much of a rallying cry. It's not hard to express the quality we're looking for in metaphors. The best is probably a running back. A good running back is not merely determined, but flexible as well. They want to get downfield, but they adapt their plans on the fly. Unfortunately this is just a metaphor, and not a useful one to most people outside the US.",
+      title: "The Mongol Empire and Pax Mongolica",
+      content: "The Mongol Empire, established by Genghis Khan in the early 13th century, became the largest contiguous land empire in world history, stretching from Eastern Europe to the Pacific Ocean. Under Mongol rule, the Pax Mongolica (Mongol Peace) created unprecedented opportunities for trade and cultural exchange along the Silk Road. The Mongols conquered China, establishing the Yuan Dynasty under Kublai Khan, and extended their influence into the Middle East through the Il-Khanate and into Eastern Europe through the Golden Horde. Despite their fearsome reputation for military conquest and destruction, the Mongols often adopted local customs and administrative practices, promoted religious tolerance, and facilitated cultural synthesis across their vast empire. Their decimal military organization, efficient communication systems, and promotion of trade made them effective rulers who connected distant regions of Afro-Eurasia.",
       level: 1
     },
     {
-      title: "Being Resourceful",
-      content: "But finally I've figured out how to express this quality directly. I was writing a talk for investors, and I had to explain what to look for in founders. What would someone who was the opposite of hapless be like? They'd be relentlessly resourceful. Not merely relentless. That's not enough to make things go your way except in a few mostly uninteresting domains. In any interesting domain, the difficulties will be novel. Which means you can't simply plow through them, because you don't know initially how hard they are. You don't know whether you're about to plow through a block of foam or granite. So you have to be resourceful. You have to keep trying new things.",
+      title: "Islamic Expansion and Cultural Influence",
+      content: "Islamic civilization experienced tremendous growth and territorial expansion during the Post-Classical Period. The Abbasid Caliphate, centered in Baghdad, became a major center of learning, translation, and scientific advancement, preserving and building upon Greek, Persian, and Indian knowledge. Islamic traders and missionaries spread Islam throughout sub-Saharan Africa, Southeast Asia, and parts of Eastern Europe through both commercial networks and conquest. The concept of Dar al-Islam (the realm of Islam) created a unified cultural and religious sphere that facilitated trade, scholarship, and cultural exchange across vast distances. Major Islamic empires and states included the Ottoman Empire in the Eastern Mediterranean and Anatolia, various sultanates in India including the Delhi Sultanate, and trading communities throughout the Indian Ocean basin. Islamic scholars made significant contributions to mathematics, astronomy, medicine, and philosophy during this period.",
+      level: 1
+    },
+    {
+      title: "Technological Innovation and Cultural Exchange",
+      content: "The period 1200-1450 witnessed remarkable technological innovations and their diffusion across trade networks. Chinese innovations, including gunpowder, the magnetic compass, printing technology, and advanced metallurgy, spread westward along the Silk Road and maritime routes. Islamic scholars and inventors made crucial advances in mathematics (including algebra and trigonometry), astronomy (improving the astrolabe), medicine, and engineering. The printing press, adapted and improved in Europe during the 15th century, revolutionized the spread of knowledge and literacy. Architectural achievements flourished across different cultures, from Gothic cathedrals in Europe to Islamic madrasas and mosques, Chinese pagodas, and impressive structures like Angkor Wat in Southeast Asia. The establishment of universities in Europe and madrasas in the Islamic world created new centers of learning that promoted scholarship, scientific inquiry, and cultural exchange between different intellectual traditions.",
+      level: 1
+    },
+    {
+      title: "Environmental Changes and the Black Death",
+      content: "The Post-Classical Period experienced significant environmental and demographic changes that profoundly impacted human societies. The Medieval Warm Period (roughly 900-1300 CE) facilitated agricultural expansion, population growth, and the establishment of new settlements, contributing to increased trade and urbanization. However, around 1300, the Little Ice Age began, bringing cooler temperatures, crop failures, and social unrest in many regions. The most catastrophic demographic event was the Black Death pandemic (1347-1351), which originated in Central Asia and spread along trade routes throughout Afro-Eurasia. This bubonic plague killed an estimated one-third of Europe's population and had devastating impacts in the Middle East, North Africa, and parts of Asia. The pandemic forced societies to adapt their agricultural practices, labor systems, and social structures, leading to significant changes in wages, land tenure, and social mobility. These environmental and demographic pressures contributed to social upheavals, religious movements, and political transformations across the affected regions.",
       level: 1
     }
   ]
@@ -32,8 +84,7 @@ const DEVELOPER_MODE_DATA = {
 
 export default function App() {
   const [url, setUrl] = useState("");
-  const [useLLMExtraction, setUseLLMExtraction] = useState(true);
-  const [developerMode, setDeveloperMode] = useState(true); // Enable developer mode by default
+  const [developerMode, setDeveloperMode] = useState(false);
   const router = useRouter();
   const { setScrapedData, setLoading, setError, setCurrentUrl } = useLexioActions();
   const { isLoading, error } = useLexioState();
@@ -78,7 +129,7 @@ export default function App() {
     setCurrentUrl(url);
 
     try {
-      const result = await scrapeWebsite(url, useLLMExtraction);
+      const result = await scrapeWebsite(url); // AI enhancement is now always enabled by default
       setScrapedData(result);
       router.push("/read");
     } catch (err) {
@@ -91,12 +142,13 @@ export default function App() {
   return (
     <div className="min-h-screen bg-white text-black font-sans">
       <div className="flex items-center justify-center min-h-screen p-6">
-        <div className="w-full max-w-[600px] mx-auto">
+        <div className="w-full max-w-xl mx-auto space-y-6">
+          
           {/* Back to Home Button */}
-          <div className="mb-12">
+          <div className="flex justify-start">
             <button
               onClick={() => router.push("/")}
-              className="flex items-center gap-2 text-gray-400 hover:text-black transition-colors duration-200"
+              className="flex items-center gap-2 text-neutral-400 hover:text-black transition-colors duration-200"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
@@ -105,153 +157,107 @@ export default function App() {
             </button>
           </div>
 
-          <div className="text-center mb-16">
-            <h1 className="text-5xl sm:text-6xl font-medium tracking-tight mb-6">
+          {/* Title */}
+          <div className="text-center space-y-3">
+            <h1 className="text-5xl font-bold tracking-tight leading-none">
               lexio.
             </h1>
-            <p className="text-lg text-gray-600 leading-relaxed max-w-md mx-auto">
-              enter any website url to convert its content into natural speech
+            <p className="text-base text-neutral-500 max-w-md mx-auto leading-relaxed">
+              enter any website url to convert its content<br />
+              into natural speech
             </p>
           </div>
 
-          <form onSubmit={handleLexio} className="space-y-8">
-            <div className="relative">
+          {/* Main Form */}
+          <form onSubmit={handleLexio} className="space-y-6">
+            {/* URL Input */}
+            <div className="w-full">
               <input
                 type="url"
-                value={developerMode ? "https://paulgraham.com/relres.html (developer mode)" : url}
+                value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder={developerMode ? "developer mode enabled - paul graham essay loaded" : "https://example.com"}
-                className="w-full px-4 py-3 text-lg border border-gray-200 bg-white text-black placeholder-gray-400 focus:outline-none focus:border-black transition-all duration-200"
-                disabled={isLoading || developerMode}
-              />
-              {!developerMode && url && !isValidUrl(url) && (
-                <div className="absolute inset-y-0 right-0 flex items-center pr-4">
-                  <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                  </svg>
-                </div>
-              )}
-              {developerMode && (
-                <div className="absolute inset-y-0 right-0 flex items-center pr-4">
-                  <div className="text-xs bg-black text-white px-2 py-1">
-                    dev
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Developer Mode Toggle */}
-            <div className="flex items-center justify-between text-sm mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-gray-600">developer mode</span>
-                <div className="group relative">
-                  <svg className="w-4 h-4 text-gray-400 hover:text-black transition-colors cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                    <path d="M12 17h.01"/>
-                  </svg>
-                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-black text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
-                    use paul graham essay for testing
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDeveloperMode(!developerMode)}
+                placeholder="https://example.com"
+                className="w-full px-6 py-4 text-lg border border-neutral-200 rounded-xl bg-white text-black placeholder-neutral-400 focus:outline-none focus:border-black focus:ring-1 focus:ring-black transition-all duration-200"
                 disabled={isLoading}
-                className={`relative inline-flex h-6 w-11 items-center transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
-                  developerMode ? 'bg-black' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform bg-white transition-transform ${
-                    developerMode ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
+                autoFocus
+              />
             </div>
 
-            {/* AI Enhancement Toggle */}
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-gray-600">ai enhancement</span>
-                <div className="group relative">
-                  <svg className="w-4 h-4 text-gray-400 hover:text-black transition-colors cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                    <path d="M12 17h.01"/>
-                  </svg>
-                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-black text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
-                    cleans text for better narration
-                  </div>
-                </div>
+            {/* Toggle Controls */}
+            <div className="space-y-4">
+              {/* Developer Mode Toggle */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-neutral-600">developer mode</span>
+                <button
+                  type="button"
+                  onClick={() => setDeveloperMode(!developerMode)}
+                  disabled={isLoading}
+                  className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
+                    developerMode ? 'bg-black' : 'bg-neutral-200'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                      developerMode ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setUseLLMExtraction(!useLLMExtraction)}
-                disabled={isLoading || developerMode}
-                className={`relative inline-flex h-6 w-11 items-center transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
-                  useLLMExtraction ? 'bg-black' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform bg-white transition-transform ${
-                    useLLMExtraction ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
             </div>
 
+            {/* Error Display */}
             {error && (
-              <div className="p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
                 {error}
               </div>
             )}
 
+            {/* Submit Button */}
             <button
               type="submit"
               disabled={isLoading || (!developerMode && (!url || !isValidUrl(url)))}
-              className="w-full px-6 py-3 bg-black text-white font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+              className="w-full px-6 py-3 bg-black text-white font-semibold rounded-lg hover:bg-neutral-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
             >
               {isLoading ? (
                 <span className="flex items-center justify-center gap-2">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  {developerMode ? "loading paul graham essay..." : "processing..."}
+                  processing...
                 </span>
               ) : (
-                developerMode ? "convert to speech (dev mode)" : "convert to speech"
+                "convert to speech"
               )}
             </button>
           </form>
 
-          <div className="mt-12 text-center">
-            <p className="text-sm text-gray-600 mb-6">
-              {developerMode ? "developer mode active - using paul graham essay" : "try these examples:"}
-            </p>
-            {!developerMode && (
+          {/* Example Links */}
+          {!developerMode && (
+            <div className="text-center space-y-4">
+              <p className="text-sm text-neutral-500">try these examples:</p>
               <div className="flex flex-wrap gap-3 justify-center">
                 {[
-                  "https://news.ycombinator.com",
-                  "https://www.wikipedia.org",
-                  "https://github.com/trending"
-                ].map((exampleUrl) => (
+                  { url: "https://news.ycombinator.com", label: "news.ycombinator.com" },
+                  { url: "https://www.wikipedia.org", label: "wikipedia.org" },
+                  { url: "https://github.com/trending", label: "github.com/trending" }
+                ].map((example) => (
                   <button
-                    key={exampleUrl}
-                    onClick={() => setUrl(exampleUrl)}
-                    className="px-4 py-2 text-sm bg-gray-50 text-gray-600 hover:bg-gray-100 hover:text-black border border-gray-200 hover:border-gray-300 transition-all duration-200"
+                    key={example.url}
+                    onClick={() => setUrl(example.url)}
+                    className="px-4 py-2 text-sm border border-neutral-200 rounded-lg text-neutral-600 hover:text-black hover:border-neutral-300 hover:shadow-sm transition-all duration-200"
                     disabled={isLoading}
                   >
-                    {new URL(exampleUrl).hostname}
+                    {example.label}
                   </button>
                 ))}
               </div>
-            )}
-            {developerMode && (
-              <div className="text-sm text-gray-500">
-                click "convert to speech (dev mode)" to test with the paul graham essay
-              </div>
-            )}
-          </div>
+            </div>
+          )}
+          
+          {developerMode && (
+            <div className="text-center">
+              <p className="text-sm text-neutral-500">developer mode enabled - using sample content</p>
+            </div>
+          )}
+
         </div>
       </div>
     </div>
