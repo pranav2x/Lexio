@@ -15,7 +15,8 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  closestCenter
+  closestCenter,
+  rectIntersection
 } from "@dnd-kit/core";
 
 interface WordData {
@@ -78,11 +79,13 @@ export default function ReadPage() {
   const contentRef = useRef<HTMLDivElement>(null);
   const highlightedWordRef = useRef<HTMLSpanElement>(null);
 
-  // Drag sensors for smooth performance
+  // Drag sensors for smooth performance with stricter activation
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 8, // Require 8px of movement before drag starts
+        distance: 12, // Require 12px of movement before drag starts (more deliberate)
+        delay: 100, // Small delay to prevent accidental drags
+        tolerance: 8, // Allow some tolerance for small movements
       },
     })
   );
@@ -210,10 +213,19 @@ export default function ReadPage() {
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     
+    // Always clear the drag state first
     setActiveId(null);
     setDraggedItem(null);
     
-    if (!over || over.id !== 'listening-queue' || !scrapedData) return;
+    // Only proceed if we have both active item and valid drop target
+    if (!over || !scrapedData) {
+      return;
+    }
+    
+    // Strictly check that the drop target is exactly the listening queue
+    if (over.id !== 'listening-queue') {
+      return;
+    }
 
     const draggedId = active.id.toString();
     
@@ -284,7 +296,7 @@ export default function ReadPage() {
 
   // Optimized Draggable Card Component
   const DraggableCard = React.memo(({ id, children }: { id: string; children: React.ReactNode }) => {
-    const { attributes, listeners, setNodeRef, transform } = useDraggable({
+    const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
       id,
     });
 
@@ -292,8 +304,9 @@ export default function ReadPage() {
 
     const style: React.CSSProperties = {
       transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-      opacity: isActive ? 0.4 : 1,
+      opacity: isDragging ? 0 : 1, // Make original completely invisible when dragging
       willChange: 'transform',
+      zIndex: isDragging ? 1000 : 'auto',
     };
 
     return (
@@ -305,8 +318,8 @@ export default function ReadPage() {
         className={`
           draggable-item gpu-accelerated
           transition-all duration-200 ease-out
-          ${isActive 
-            ? 'scale-105 rotate-2 cursor-grabbing z-50' 
+          ${isDragging 
+            ? 'cursor-grabbing' 
             : 'cursor-grab hover:scale-[1.01] hover:shadow-lg drag-smooth'
           }
         `}
@@ -320,25 +333,25 @@ export default function ReadPage() {
   // Drag Overlay Component for smooth dragging
   const DragOverlayCard = ({ item }: { item: { id: string; title: string; content: string } }) => {
     return (
-      <div className="w-full bg-white border-2 border-black rounded-2xl p-6 h-64 flex flex-col shadow-2xl transform rotate-3 scale-110 gpu-accelerated">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+      <div className="w-full bg-white border-2 border-black rounded-xl p-5 h-56 flex flex-col shadow-2xl transform rotate-3 scale-110 gpu-accelerated">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
               item.id === 'summary' ? 'bg-blue-500' : 'bg-green-500'
             }`}></div>
-            <h3 className="text-lg font-semibold text-black truncate">
+            <h3 className="text-base font-semibold text-black truncate">
               {item.title}
             </h3>
           </div>
-          <div className="p-3 bg-neutral-100 rounded-xl">
+          <div className="p-2.5 bg-neutral-100 rounded-lg">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
             </svg>
           </div>
         </div>
         <div className="flex-1 overflow-hidden">
-          <p className="text-sm text-neutral-600 leading-relaxed line-clamp-8">
-            {item.content.length > 300 ? item.content.substring(0, 300) + '...' : item.content}
+          <p className="text-sm text-neutral-600 leading-relaxed line-clamp-7">
+            {item.content.length > 280 ? item.content.substring(0, 280) + '...' : item.content}
           </p>
         </div>
       </div>
@@ -357,13 +370,13 @@ export default function ReadPage() {
       <div
         ref={setNodeRef}
         className={`
-          w-full h-[850px] bg-white border-2 rounded-2xl p-6 
-          gpu-accelerated transition-all duration-300 ease-out flex flex-col
+          w-full min-h-[600px] lg:min-h-[700px] xl:min-h-[737px] bg-white border-2 rounded-xl p-6 
+          gpu-accelerated transition-all duration-300 ease-out flex flex-col shadow-sm
           ${isOver 
             ? 'border-black bg-gradient-to-br from-blue-50 to-green-50 scale-[1.02] shadow-xl' 
             : isDragActive
               ? 'border-blue-300 bg-blue-25 scale-[1.01]'
-              : 'border-neutral-200 hover:border-neutral-300'
+              : 'border-neutral-200 hover:border-neutral-400'
           }
         `}
         style={{ willChange: 'transform, background-color, border-color' }}
@@ -811,43 +824,6 @@ export default function ReadPage() {
 
 
 
-  // Enhanced text preparation with section-specific highlighting
-  const prepareTextForTTS = (text: string, sectionType: PlayingSection) => {
-    // Only show highlighting if this section is currently playing and matches the current playing text
-    const shouldHighlight = currentPlayingSection === sectionType && 
-                           currentPlayingText && 
-                           text === currentPlayingText;
-    
-    const words = text.split(/(\s+)/);
-    
-    return words.map((word, index) => {
-      const isWhitespace = word.trim() === '';
-      const isHighlighted = shouldHighlight && currentWordIndex === index;
-      
-      if (isWhitespace) {
-        return word; // Return whitespace as-is
-      }
-      
-      return (
-        <span
-          key={index}
-          ref={isHighlighted ? highlightedWordRef : undefined}
-          className={`inline-block cursor-pointer transition-all duration-200 ${
-            isHighlighted 
-              ? 'bg-yellow-300 dark:bg-yellow-600 text-black dark:text-white px-1 py-0.5 rounded-sm shadow-md scale-105' 
-              : shouldHighlight 
-                ? 'hover:bg-secondary/50 px-0.5 py-0.5 rounded-sm' 
-                : 'px-0.5 py-0.5'
-          }`}
-          onClick={() => shouldHighlight && handleWordClick(index)}
-          title={shouldHighlight ? "Click to jump to this word" : undefined}
-        >
-          {word}
-        </span>
-      );
-    });
-  };
-
   if (!scrapedData) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-background to-secondary/20 flex items-center justify-center p-4">
@@ -862,11 +838,19 @@ export default function ReadPage() {
       return (
     <DndContext 
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={rectIntersection}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
       <div className="min-h-screen bg-white text-black [&_*]:text-black">
+        <style jsx>{`
+          .line-clamp-7 {
+            display: -webkit-box;
+            -webkit-line-clamp: 7;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+          }
+        `}</style>
       {/* Hidden Audio Element */}
       {audioUrl && (
         <audio
@@ -895,7 +879,7 @@ export default function ReadPage() {
       )}
 
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-40 border-b border-border/40 bg-white">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
             <button
@@ -923,259 +907,113 @@ export default function ReadPage() {
         </div>
       </header>
 
-      {/* Audio Controls */}
-      <div className="sticky top-16 z-30 border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="max-w-4xl mx-auto">
-            {isGeneratingAudio && (
-              <div className="flex items-center justify-center gap-3 mb-4">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
-                <span className="text-muted-foreground">Generating audio...</span>
-              </div>
-            )}
 
-            {audioError && (
-              <div className="flex items-center justify-center gap-2 mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-                <span className="text-red-800 dark:text-red-200 text-sm">{audioError}</span>
-                <button
-                  onClick={generateAudioFromText}
-                  className="text-red-600 hover:text-red-800 text-sm underline ml-2"
-                >
-                  Retry
-                </button>
-              </div>
-            )}
-
-            {/* Generate Audio Button - Show when no audio is generated yet */}
-            {!audioUrl && !isGeneratingAudio && !audioError && (
-              <div className="flex items-center justify-center mb-4">
-                <button
-                  onClick={generateAudioFromText}
-                  className="flex items-center gap-3 px-8 py-4 bg-primary text-primary-foreground rounded-xl font-semibold text-lg hover:bg-primary/90 transition-all duration-200 shadow-lg hover:shadow-xl"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                  </svg>
-                  <span>Generate Audio</span>
-                </button>
-              </div>
-            )}
-
-            {audioUrl && !isGeneratingAudio && (
-              <div className="space-y-4">
-                {/* Play Controls */}
-                <div className="flex items-center justify-center gap-4">
-                  <button
-                    onClick={handlePlayPause}
-                    disabled={!audioUrl}
-                    className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-200 ${
-                      isPlaying
-                        ? 'bg-red-500 text-white hover:bg-red-600'
-                        : 'bg-primary text-primary-foreground hover:bg-primary/90'
-                    } disabled:opacity-50 disabled:cursor-not-allowed`}
-                  >
-                    {isPlaying ? (
-                      <>
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6" />
-                        </svg>
-                        <span>Pause</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                        <span>Play Audio</span>
-                      </>
-                    )}
-                  </button>
-                  
-                  <button
-                    onClick={handleStop}
-                    disabled={!audioUrl}
-                    className="flex items-center gap-2 px-4 py-3 rounded-lg font-medium bg-secondary text-secondary-foreground hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 10h6v4H9z" />
-                    </svg>
-                    <span>Stop</span>
-                  </button>
-
-                  <button
-                    onClick={generateAudioFromText}
-                    className="flex items-center gap-2 px-4 py-3 rounded-lg font-medium bg-accent text-accent-foreground hover:bg-accent/80 transition-colors"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Regenerate</span>
-                  </button>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm text-muted-foreground">
-                    <span>{formatTime(currentTime)}</span>
-                    <span>{formatTime(duration)}</span>
-                  </div>
-                  <div className="relative">
-                    <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-primary transition-all duration-200"
-                        style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                      />
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={duration || 0}
-                      value={currentTime}
-                      onChange={(e) => handleSeek(Number(e.target.value))}
-                      className="absolute inset-0 w-full h-2 opacity-0 cursor-pointer"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
 
       {/* Main Content */}
-      <main ref={contentRef} className="w-full pl-6 pr-6 py-8">
-        <div className="w-full">
-          {/* Article Header */}
-          <div className="mb-8">
-            <div className="max-w-none">
-              <h1 className="text-3xl sm:text-4xl font-bold mb-4 text-black">
+      <main ref={contentRef} className="min-h-screen bg-white">
+        {/* Container with proper margins */}
+        <div className="max-w-[1800px] mx-auto px-8 lg:px-12 py-12">
+          
+          {/* Article Header - Full Width */}
+          <div className="mb-12">
+            <div className="max-w-5xl">
+              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-6 text-black leading-tight">
                 {scrapedData.title}
               </h1>
-            </div>
             
-            {currentUrl && (
-              <div className="flex items-center gap-2 text-sm text-neutral-500 mb-4">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                </svg>
-                <a 
-                  href={currentUrl} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="hover:text-black transition-colors"
-                >
-                  {currentUrl}
-                </a>
-              </div>
-            )}
-
-            {/* Content Stats */}
-            <div className="flex flex-wrap gap-4 text-sm text-neutral-500 mb-8">
-              <div className="flex items-center gap-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <span>{scrapedData.text.split(' ').length} words</span>
-                {scrapedData.cleanText && scrapedData.cleanText !== scrapedData.text && (
-                  <span className="text-blue-600 text-xs">
-                    ({scrapedData.cleanText.split(' ').length} optimized)
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>~{Math.ceil(scrapedData.text.split(' ').length / 200)} min read</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                </svg>
-                <span>~{Math.ceil(estimateTextDuration(scrapedData.text) / 60)} min listen</span>
-              </div>
-              {audioUrl && (
-                <div className="flex items-center gap-1">
+              {currentUrl && (
+                <div className="flex items-center gap-2 text-sm text-neutral-500 mb-6">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12 7-12 6z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                   </svg>
-                  <span>Audio ready</span>
+                  <a 
+                    href={currentUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="hover:text-black transition-colors"
+                  >
+                    {currentUrl}
+                  </a>
                 </div>
               )}
-            </div>
 
-            {/* How to Listen Instructions */}
-            <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-6 mb-8">
-              <h3 className="text-lg font-semibold text-black mb-4 flex items-center gap-2">
-                <svg className="w-5 h-5 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                How to Listen
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-neutral-600">
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-xs font-semibold text-blue-600">1</span>
-                  </div>
-                  <p>Click any play button to start listening to that section</p>
+              {/* Content Stats */}
+              <div className="flex flex-wrap gap-6 text-sm text-neutral-500 mb-8">
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>{scrapedData.text.split(' ').length} words</span>
+                  {scrapedData.cleanText && scrapedData.cleanText !== scrapedData.text && (
+                    <span className="text-blue-600 text-xs">
+                      ({scrapedData.cleanText.split(' ').length} optimized)
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-xs font-semibold text-green-600">2</span>
-                  </div>
-                  <p>Words highlight in yellow as they're spoken</p>
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>~{Math.ceil(scrapedData.text.split(' ').length / 200)} min read</span>
                 </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-xs font-semibold text-purple-600">3</span>
-                  </div>
-                  <p>Use the bottom controls to pause, adjust speed, and navigate</p>
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  </svg>
+                  <span>~{Math.ceil(estimateTextDuration(scrapedData.text) / 60)} min listen</span>
                 </div>
+                {audioUrl && (
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12 7-12 6z" />
+                    </svg>
+                    <span>Audio ready</span>
+                  </div>
+                )}
               </div>
+
+
             </div>
           </div>
 
-          {/* Left-aligned Layout - No columns, pure left alignment */}
-          <div className="flex gap-10">
-            {/* Content Cards - Left-aligned with no centering */}
-            <div className="flex-1 max-w-4xl">
-              {/* Content Grid - Left-aligned with even spacing */}
-              <div className="grid grid-cols-2 gap-10 auto-rows-min">
+          {/* Main 3-Column Layout Grid */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 xl:gap-12 items-start">
+            
+            {/* Content Cards Section - Takes up 8/12 columns */}
+            <div className="xl:col-span-8">
+              {/* Cards Grid - 2 columns of cards */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
                 
                 {/* Section Cards */}
                 {scrapedData.sections.slice(0, 5).map((section, index) => (
                   <DraggableCard key={index} id={`section-${index}`}>
                     <div 
-                      className={`w-full bg-white border-2 rounded-2xl p-6 flex flex-col transition-all duration-300 ease-in-out ${
-                        expandedBoxes.has(`section-${index}`) ? 'h-auto min-h-64' : 'h-64'
+                      className={`w-full bg-white border-2 rounded-xl p-5 flex flex-col transition-all duration-300 ease-in-out shadow-sm hover:shadow-md ${
+                        expandedBoxes.has(`section-${index}`) ? 'h-auto min-h-56' : 'h-56'
                       } ${
                         currentPlayingSection === `section-${index}` 
-                          ? 'border-black bg-neutral-50' 
-                          : 'border-neutral-200 hover:border-neutral-300'
+                          ? 'border-black bg-neutral-50 shadow-lg' 
+                          : 'border-neutral-200 hover:border-neutral-400'
                       }`}
                     >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
                           index % 3 === 0 ? 'bg-green-500' : 
                           index % 3 === 1 ? 'bg-purple-500' : 'bg-orange-500'
                         }`}></div>
-                        <h3 className="text-lg font-semibold text-black truncate">
+                        <h3 className="text-base font-semibold text-black truncate">
                           {section.title}
                         </h3>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="flex items-center gap-1 flex-shrink-0">
                         {needsExpansion(section.content) && (
                           <button
                             onClick={() => toggleBoxExpansion(`section-${index}`)}
                             className="p-2 rounded-lg hover:bg-neutral-100 transition-colors duration-200"
                           >
                             <svg 
-                              className={`w-4 h-4 text-neutral-600 transition-transform duration-300 ${
+                              className={`w-4 h-4 text-neutral-500 transition-transform duration-300 ${
                                 expandedBoxes.has(`section-${index}`) ? 'rotate-180' : ''
                               }`} 
                               fill="none" 
@@ -1189,11 +1027,11 @@ export default function ReadPage() {
                         <button
                           onClick={() => generateAudioForSection(`section-${index}` as PlayingSection)}
                           disabled={isGeneratingAudio}
-                          className={`play-button relative p-3 rounded-xl transition-all duration-300 transform active:scale-95 hover:scale-105 shadow-sm hover:shadow-md ${
+                          className={`play-button relative p-2.5 rounded-lg transition-all duration-300 transform active:scale-95 hover:scale-105 ${
                             currentPlayingSection === `section-${index}`
-                              ? 'bg-neutral-300 text-black shadow-lg'
+                              ? 'bg-neutral-300 text-black'
                               : 'bg-neutral-100 text-black hover:bg-neutral-200 active:bg-neutral-300'
-                          } disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none`}
+                          } disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}
                           onMouseDown={(e) => {
                             e.currentTarget.classList.add('play-button-clicked');
                             setTimeout(() => {
@@ -1208,8 +1046,6 @@ export default function ReadPage() {
                               <path d="M8 5v14l11-7z" />
                             </svg>
                           )}
-                          {/* Click ripple effect */}
-                          <div className="absolute inset-0 rounded-xl opacity-0 bg-white/20 transition-opacity duration-200"></div>
                         </button>
                       </div>
                     </div>
@@ -1217,11 +1053,11 @@ export default function ReadPage() {
                       expandedBoxes.has(`section-${index}`) ? 'overflow-visible' : ''
                     }`}>
                       <p className={`text-sm text-neutral-600 leading-relaxed ${
-                        expandedBoxes.has(`section-${index}`) ? '' : 'line-clamp-8'
+                        expandedBoxes.has(`section-${index}`) ? '' : 'line-clamp-7'
                       }`}>
                         {expandedBoxes.has(`section-${index}`)
                           ? section.content
-                          : (section.content.length > 300 ? section.content.substring(0, 300) + '...' : section.content)
+                          : (section.content.length > 280 ? section.content.substring(0, 280) + '...' : section.content)
                         }
                       </p>
                     </div>
@@ -1235,13 +1071,13 @@ export default function ReadPage() {
 
                 {/* Additional Sections (if more than 5) */}
                 {scrapedData.sections.length > 5 && (
-                  <div className="w-full bg-white border-2 border-neutral-200 rounded-2xl p-6 h-64 flex flex-col justify-center items-center text-center hover:border-neutral-300 transition-all duration-200">
-                    <div className="w-12 h-12 bg-neutral-100 rounded-full flex items-center justify-center mb-4">
-                      <svg className="w-6 h-6 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-full bg-white border-2 border-neutral-200 rounded-xl p-5 h-56 flex flex-col justify-center items-center text-center hover:border-neutral-400 transition-all duration-200 shadow-sm hover:shadow-md">
+                    <div className="w-10 h-10 bg-neutral-100 rounded-full flex items-center justify-center mb-3">
+                      <svg className="w-5 h-5 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                       </svg>
                     </div>
-                    <h3 className="text-lg font-semibold text-black mb-2">More Sections</h3>
+                    <h3 className="text-base font-semibold text-black mb-2">More Sections</h3>
                     <p className="text-sm text-neutral-600">
                       +{scrapedData.sections.length - 5} additional sections available
                     </p>
@@ -1251,26 +1087,26 @@ export default function ReadPage() {
                 {/* Summary Card - Moved to bottom */}
                 {scrapedData.text && (
                   <DraggableCard id="summary">
-                    <div className={`w-full bg-white border-2 rounded-2xl p-6 flex flex-col transition-all duration-300 ease-in-out ${
-                      expandedBoxes.has('summary') ? 'h-auto min-h-64' : 'h-64'
+                    <div className={`w-full bg-white border-2 rounded-xl p-5 flex flex-col transition-all duration-300 ease-in-out shadow-sm hover:shadow-md ${
+                      expandedBoxes.has('summary') ? 'h-auto min-h-56' : 'h-56'
                     } ${
                       currentPlayingSection === 'summary' 
-                        ? 'border-black bg-neutral-50' 
-                        : 'border-neutral-200 hover:border-neutral-300'
+                        ? 'border-black bg-neutral-50 shadow-lg' 
+                        : 'border-neutral-200 hover:border-neutral-400'
                     }`}>
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                        <h3 className="text-lg font-semibold text-black">Summary</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2.5 h-2.5 bg-blue-500 rounded-full"></div>
+                        <h3 className="text-base font-semibold text-black">Summary</h3>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
                         {/* Always show expand for summary since it's truncated content */}
                         <button
                           onClick={() => toggleBoxExpansion('summary')}
                           className="p-2 rounded-lg hover:bg-neutral-100 transition-colors duration-200"
                         >
                           <svg 
-                            className={`w-4 h-4 text-neutral-600 transition-transform duration-300 ${
+                            className={`w-4 h-4 text-neutral-500 transition-transform duration-300 ${
                               expandedBoxes.has('summary') ? 'rotate-180' : ''
                             }`} 
                             fill="none" 
@@ -1283,11 +1119,11 @@ export default function ReadPage() {
                         <button
                           onClick={() => generateAudioForSection('summary')}
                           disabled={isGeneratingAudio}
-                          className={`play-button relative p-3 rounded-xl transition-all duration-300 transform active:scale-95 hover:scale-105 shadow-sm hover:shadow-md ${
+                          className={`play-button relative p-2.5 rounded-lg transition-all duration-300 transform active:scale-95 hover:scale-105 ${
                             currentPlayingSection === 'summary'
-                              ? 'bg-neutral-300 text-black shadow-lg'
+                              ? 'bg-neutral-300 text-black'
                               : 'bg-neutral-100 text-black hover:bg-neutral-200 active:bg-neutral-300'
-                          } disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none`}
+                          } disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}
                           onMouseDown={(e) => {
                             e.currentTarget.classList.add('play-button-clicked');
                             setTimeout(() => {
@@ -1302,8 +1138,6 @@ export default function ReadPage() {
                               <path d="M8 5v14l11-7z" />
                             </svg>
                           )}
-                          {/* Click ripple effect */}
-                          <div className="absolute inset-0 rounded-xl opacity-0 bg-white/20 transition-opacity duration-200 animate-pulse-once"></div>
                         </button>
                       </div>
                     </div>
@@ -1311,11 +1145,11 @@ export default function ReadPage() {
                       expandedBoxes.has('summary') ? 'overflow-visible' : ''
                     }`}>
                       <p className={`text-sm text-neutral-600 leading-relaxed ${
-                        expandedBoxes.has('summary') ? '' : 'line-clamp-8'
+                        expandedBoxes.has('summary') ? '' : 'line-clamp-7'
                       }`}>
                         {expandedBoxes.has('summary') 
                           ? (scrapedData.cleanText || scrapedData.text)
-                          : extractSummary(scrapedData.text, 200)
+                          : extractSummary(scrapedData.text, 180)
                         }
                       </p>
                     </div>
@@ -1325,37 +1159,37 @@ export default function ReadPage() {
               </div>
             </div>
 
-            {/* Listening Queue - Integrated into layout */}
-            <div className="w-96 flex-shrink-0">
-              <div className="sticky top-24">
+            {/* Listening Queue - Takes up 4/12 columns */}
+            <div className="xl:col-span-4">
+              <div className="xl:sticky xl:top-24">
                 <ListeningQueueDropZone />
               </div>
             </div>
+          </div>
 
-            {/* Right Side - Currently Playing Info & Controls (4/12 columns) */}
-            <div className="w-80 flex-shrink-0">
-              <div className="sticky top-8">
-                {/* Currently Playing Card */}
-                {currentPlayingSection && audioUrl && (
-                  <div className="bg-neutral-50 border border-neutral-200 text-black rounded-2xl p-6 mb-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                      <span className="text-sm font-medium">Now Playing</span>
-                    </div>
-                    <h3 className="text-lg font-semibold mb-2">
-                      {currentPlayingSection === 'summary' ? 'Summary' :
-                       currentPlayingSection?.startsWith('section-') ? 
-                         scrapedData.sections[parseInt(currentPlayingSection.replace('section-', ''))]?.title || 'Section' : 
-                         currentPlayingSection}
-                    </h3>
-                    {currentWordIndex !== -1 && wordsData[currentWordIndex] && (
-                      <p className="text-sm text-neutral-600">
-                        Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} of {wordsData.filter(word => !word.isWhitespace).length}
-                      </p>
-                    )}
+          {/* Currently Playing Info & Controls - Separate section below */}
+          <div className="mt-8 xl:mt-12">
+            <div className="max-w-2xl">
+              {/* Currently Playing Card */}
+              {currentPlayingSection && audioUrl && (
+                <div className="bg-neutral-50 border border-neutral-200 text-black rounded-2xl p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm font-medium">Now Playing</span>
                   </div>
-                )}
-              </div>
+                  <h3 className="text-lg font-semibold mb-2">
+                    {currentPlayingSection === 'summary' ? 'Summary' :
+                     currentPlayingSection?.startsWith('section-') ? 
+                       scrapedData.sections[parseInt(currentPlayingSection.replace('section-', ''))]?.title || 'Section' : 
+                       currentPlayingSection}
+                  </h3>
+                  {currentWordIndex !== -1 && wordsData[currentWordIndex] && (
+                    <p className="text-sm text-neutral-600">
+                      Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} of {wordsData.filter(word => !word.isWhitespace).length}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1484,11 +1318,11 @@ export default function ReadPage() {
         </div>
       )}
 
-      {/* Drag Overlay for smooth dragging */}
-      <DragOverlay>
-        {draggedItem ? <DragOverlayCard item={draggedItem} /> : null}
-      </DragOverlay>
-    </div>
+        {/* Drag Overlay for smooth dragging */}
+        <DragOverlay>
+          {draggedItem ? <DragOverlayCard item={draggedItem} /> : null}
+        </DragOverlay>
+      </div>
     </DndContext>
   );
 } 
