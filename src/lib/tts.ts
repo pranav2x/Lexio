@@ -1,5 +1,5 @@
 /**
- * Text-to-Speech integration using ElevenLabs API
+ * Text-to-Speech integration using ElevenLabs API with development caching
  */
 
 export interface TTSOptions {
@@ -14,6 +14,14 @@ export interface TTSResult {
   audioUrl: string;
   audioBlob: Blob;
   duration?: number;
+  fromCache?: boolean;
+}
+
+interface CachedAudio {
+  audioData: string; // Base64 encoded audio
+  timestamp: number;
+  textHash: string;
+  voiceSettings: string;
 }
 
 /**
@@ -26,6 +34,137 @@ const DEFAULT_TTS_OPTIONS: Required<TTSOptions> = {
   style: 0.0,
   useSpeakerBoost: true,
 };
+
+/**
+ * Development cache settings
+ */
+const DEV_CACHE_KEY = 'narrate-dev-tts-cache';
+const DEV_CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+const DEV_CACHE_MAX_SIZE = 50; // Maximum number of cached items
+
+/**
+ * Check if we're in development mode
+ */
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+/**
+ * Generate a simple hash for text content
+ */
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return Math.abs(hash).toString(36);
+}
+
+/**
+ * Generate cache key from text and voice settings
+ */
+function generateCacheKey(text: string, options: Required<TTSOptions>): string {
+  const textHash = simpleHash(text.trim().toLowerCase());
+  const settingsHash = simpleHash(JSON.stringify({
+    voiceId: options.voiceId,
+    stability: options.stability,
+    similarityBoost: options.similarityBoost,
+    style: options.style,
+    useSpeakerBoost: options.useSpeakerBoost,
+  }));
+  return `${textHash}-${settingsHash}`;
+}
+
+/**
+ * Get cached audio from localStorage (development only)
+ */
+function getCachedAudio(cacheKey: string): CachedAudio | null {
+  if (!isDevelopment || typeof window === 'undefined') return null;
+  
+  try {
+    const cacheData = localStorage.getItem(DEV_CACHE_KEY);
+    if (!cacheData) return null;
+    
+    const cache = JSON.parse(cacheData);
+    const item = cache[cacheKey];
+    
+    if (!item) return null;
+    
+    // Check if cache item is still valid (not expired)
+    if (Date.now() - item.timestamp > DEV_CACHE_MAX_AGE) {
+      // Remove expired item
+      delete cache[cacheKey];
+      localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
+      return null;
+    }
+    
+    return item;
+  } catch (error) {
+    console.debug('Error reading TTS cache:', error);
+    return null;
+  }
+}
+
+/**
+ * Cache audio data in localStorage (development only)
+ */
+function setCachedAudio(cacheKey: string, audioBlob: Blob, textHash: string, voiceSettings: string): void {
+  if (!isDevelopment || typeof window === 'undefined') return;
+  
+  try {
+    // Convert blob to base64 for storage
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      try {
+        const base64Data = reader.result as string;
+        
+        const cacheData = localStorage.getItem(DEV_CACHE_KEY);
+        const cache = cacheData ? JSON.parse(cacheData) : {};
+        
+        // Add new item
+        cache[cacheKey] = {
+          audioData: base64Data,
+          timestamp: Date.now(),
+          textHash,
+          voiceSettings,
+        };
+        
+        // Limit cache size
+        const keys = Object.keys(cache);
+        if (keys.length > DEV_CACHE_MAX_SIZE) {
+          // Remove oldest items
+          const sortedKeys = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
+          const toRemove = sortedKeys.slice(0, keys.length - DEV_CACHE_MAX_SIZE);
+          toRemove.forEach(key => delete cache[key]);
+        }
+        
+        localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
+        console.log(`🎵 TTS: Cached audio for development (${keys.length}/${DEV_CACHE_MAX_SIZE})`);
+      } catch (error) {
+        console.debug('Error caching TTS audio:', error);
+      }
+    };
+    reader.readAsDataURL(audioBlob);
+  } catch (error) {
+    console.debug('Error setting TTS cache:', error);
+  }
+}
+
+/**
+ * Convert base64 data URL to blob
+ */
+function dataURLToBlob(dataURL: string): Blob {
+  const byteString = atob(dataURL.split(',')[1]);
+  const mimeString = dataURL.split(',')[0].split(':')[1].split(';')[0];
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  
+  return new Blob([ab], { type: mimeString });
+}
 
 /**
  * Generates speech audio from text using our secure API route
@@ -45,6 +184,35 @@ export async function generateSpeech(
 
   // Merge options with defaults
   const config = { ...DEFAULT_TTS_OPTIONS, ...options };
+
+  // Check development cache first
+  if (isDevelopment && typeof window !== 'undefined') {
+    const cacheKey = generateCacheKey(text, config);
+    const cachedAudio = getCachedAudio(cacheKey);
+    
+    console.log(`🔍 TTS Debug: Checking cache for key: ${cacheKey}`);
+    console.log(`📝 TTS Debug: Text length: ${text.length}, First 100 chars: "${text.substring(0, 100)}..."`);
+    
+    if (cachedAudio) {
+      try {
+        const audioBlob = dataURLToBlob(cachedAudio.audioData);
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        console.log('🎵 TTS: Using cached audio (saved API credits!)');
+        
+        return {
+          audioUrl,
+          audioBlob,
+          duration: estimateTextDuration(text),
+          fromCache: true,
+        };
+      } catch (error) {
+        console.debug('Error loading cached audio, falling back to API:', error);
+      }
+    } else {
+      console.log('❌ TTS Debug: No cache found, will use API');
+    }
+  }
 
   try {
     // Call our secure API route instead of ElevenLabs directly
@@ -75,10 +243,21 @@ export async function generateSpeech(
     // Create object URL
     const audioUrl = URL.createObjectURL(audioBlob);
 
-    return {
+    const result: TTSResult = {
       audioUrl,
       audioBlob,
+      duration: estimateTextDuration(text),
     };
+
+    // Cache the result for development
+    if (isDevelopment && typeof window !== 'undefined') {
+      const cacheKey = generateCacheKey(text, config);
+      const textHash = simpleHash(text);
+      const voiceSettings = JSON.stringify(config);
+      setCachedAudio(cacheKey, audioBlob, textHash, voiceSettings);
+    }
+
+    return result;
 
   } catch (error) {
     // Handle different types of errors
@@ -97,6 +276,48 @@ export async function generateSpeech(
 export function cleanupAudioUrl(audioUrl: string): void {
   if (audioUrl && audioUrl.startsWith('blob:')) {
     URL.revokeObjectURL(audioUrl);
+  }
+}
+
+/**
+ * Clear development TTS cache (development only)
+ */
+export function clearTTSCache(): boolean {
+  if (!isDevelopment || typeof window === 'undefined') return false;
+  
+  try {
+    localStorage.removeItem(DEV_CACHE_KEY);
+    console.log('🗑️ TTS: Development cache cleared');
+    return true;
+  } catch (error) {
+    console.debug('Error clearing TTS cache:', error);
+    return false;
+  }
+}
+
+/**
+ * Get TTS cache statistics (development only)
+ */
+export function getTTSCacheStats(): { count: number; size: string; enabled: boolean } | null {
+  if (!isDevelopment || typeof window === 'undefined') {
+    return { count: 0, size: '0 KB', enabled: false };
+  }
+  
+  try {
+    const cacheData = localStorage.getItem(DEV_CACHE_KEY);
+    if (!cacheData) {
+      return { count: 0, size: '0 KB', enabled: true };
+    }
+    
+    const cache = JSON.parse(cacheData);
+    const count = Object.keys(cache).length;
+    const sizeBytes = new Blob([cacheData]).size;
+    const sizeKB = (sizeBytes / 1024).toFixed(1);
+    
+    return { count, size: `${sizeKB} KB`, enabled: true };
+  } catch (error) {
+    console.debug('Error getting TTS cache stats:', error);
+    return { count: 0, size: '0 KB', enabled: true };
   }
 }
 

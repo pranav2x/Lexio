@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useLexioState, useLexioActions } from "@/lib/store";
 import { extractSummary } from "@/lib/firecrawl";
-import { generateSpeech, cleanupAudioUrl, estimateTextDuration } from "@/lib/tts";
+import { generateSpeech, cleanupAudioUrl, estimateTextDuration, clearTTSCache, getTTSCacheStats } from "@/lib/tts";
 import { 
   DndContext, 
   DragEndEvent, 
@@ -55,13 +55,23 @@ export default function ReadPage() {
   const [currentPlayingSection, setCurrentPlayingSection] = useState<PlayingSection>(null);
   const [currentPlayingText, setCurrentPlayingText] = useState<string>('');
   
-  // Expandable boxes state
-  const [expandedBoxes, setExpandedBoxes] = useState<Set<string>>(new Set());
+
   
   // Listening Queue state
   const [listeningQueue, setListeningQueue] = useState<QueueItem[]>([]);
   const [isQueuePlaying, setIsQueuePlaying] = useState(false);
   const [currentQueueIndex, setCurrentQueueIndex] = useState(-1);
+  
+  // Track which cards are moved to queue (to hide from original position)
+  const [movedToQueue, setMovedToQueue] = useState<Set<string>>(new Set());
+  
+  // Maximized player state with smooth transitions
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isPreloading, setIsPreloading] = useState(false);
+  
+  // Development cache state
+  const [cacheStats, setCacheStats] = useState<{ count: number; size: string; enabled: boolean } | null>(null);
   
   // Drag and drop state
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -90,43 +100,27 @@ export default function ReadPage() {
     })
   );
 
-  // Fake progress simulation for demo
+  // Sync control progress with actual audio playback (debounced)
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (controlsPlaying) {
-      interval = setInterval(() => {
-        setControlsCurrentTime(prev => {
-          const newTime = prev + 1;
-          if (newTime >= controlsTotalTime) {
-            setControlsPlaying(false);
-            return 0;
-          }
-          return newTime;
-        });
-        setControlsProgress(prev => {
-          const newProgress = prev + (100 / controlsTotalTime);
-          return newProgress >= 100 ? 0 : newProgress;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [controlsPlaying, controlsTotalTime]);
-
-  // Toggle expand/collapse for a specific box
-  const toggleBoxExpansion = (boxId: string) => {
-    setExpandedBoxes(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(boxId)) {
-        newSet.delete(boxId);
-      } else {
-        newSet.add(boxId);
+    // Debounce rapid updates to prevent UI flashing
+    const timeoutId = setTimeout(() => {
+      if (isQueuePlaying && audioRef.current && !isNaN(currentTime) && !isNaN(duration)) {
+        // Sync controls with actual audio time
+        setControlsCurrentTime(currentTime);
+        setControlsProgress(duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0);
+        setControlsPlaying(isPlaying);
+      } else if (!isQueuePlaying) {
+        // Reset controls when not playing queue
+        setControlsCurrentTime(0);
+        setControlsProgress(0);
+        setControlsPlaying(false);
       }
-      return newSet;
-    });
-  };
+    }, 50); // Small debounce to prevent rapid updates
 
-  // Check if content needs expansion (more than 300 characters)
-  const needsExpansion = (content: string) => content.length > 300;
+    return () => clearTimeout(timeoutId);
+  }, [isQueuePlaying, currentTime, duration, isPlaying]);
+
+
 
   // Queue management functions
   const addToQueue = (item: QueueItem) => {
@@ -135,41 +129,155 @@ export default function ReadPage() {
       if (prev.find(qItem => qItem.id === item.id)) return prev;
       return [...prev, item];
     });
+    
+    // Mark as moved to queue (hide from original position)
+    setMovedToQueue(prev => new Set([...prev, item.id]));
   };
 
   const removeFromQueue = (id: string) => {
     setListeningQueue(prev => prev.filter(item => item.id !== id));
+    
+    // Restore to original position (show in original position)
+    setMovedToQueue(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(id);
+      return newSet;
+    });
   };
 
   const clearQueue = () => {
     setListeningQueue([]);
     setIsQueuePlaying(false);
     setCurrentQueueIndex(-1);
+    
+    // Restore all cards to original positions
+    setMovedToQueue(new Set());
   };
 
-  // Playback control functions (demo purposes)
+  // Enhanced queue control functions with smooth state management
   const handleControlsPlayPause = () => {
-    setControlsPlaying(!controlsPlaying);
-  };
+    // Prevent rapid clicks that could cause UI flashing
+    if (isTransitioning || isPreloading) return;
+    
+    // If there are items in the queue and nothing is currently playing, start the queue
+    if (listeningQueue.length > 0 && !audioUrl && !isQueuePlaying) {
+      playQueue();
+      return;
+    }
 
-  const handleControlsPrevious = () => {
-    if (listeningQueue.length > 0) {
-      setCurrentQueueIndex(prev => prev <= 0 ? listeningQueue.length - 1 : prev - 1);
-      setControlsCurrentTime(0);
-      setControlsProgress(0);
+    // If queue is playing, pause/resume the current audio
+    if (isQueuePlaying && audioRef.current) {
+      try {
+        if (isPlaying) {
+          audioRef.current.pause();
+        } else {
+          audioRef.current.play();
+        }
+      } catch (error) {
+        console.debug('Audio control action skipped:', error);
+      }
+      return;
+    }
+
+    // Fallback for individual audio
+    if (audioRef.current && audioUrl) {
+      try {
+        if (isPlaying) {
+          audioRef.current.pause();
+        } else {
+          audioRef.current.play();
+        }
+      } catch (error) {
+        console.debug('Audio control action skipped:', error);
+      }
     }
   };
 
-  const handleControlsNext = () => {
-    if (listeningQueue.length > 0) {
-      setCurrentQueueIndex(prev => prev >= listeningQueue.length - 1 ? 0 : prev + 1);
-      setControlsCurrentTime(0);
-      setControlsProgress(0);
+  const handleControlsPrevious = async () => {
+    if (!isQueuePlaying || currentQueueIndex <= 0) return;
+    
+    // Go to previous item in queue
+    const prevIndex = currentQueueIndex - 1;
+    setCurrentQueueIndex(prevIndex);
+    const prevItem = listeningQueue[prevIndex];
+    
+    try {
+      // Cleanup current audio
+      if (audioUrl) {
+        cleanupAudioUrl(audioUrl);
+      }
+      
+      const result = await generateSpeech(prevItem.content);
+      setAudioUrl(result.audioUrl);
+      setCurrentPlayingText(prevItem.content);
+      setCurrentPlayingSection(prevItem.id as PlayingSection);
+      setCurrentWordIndex(-1);
+      
+      // Auto-play previous item
+      if (audioRef.current) {
+        audioRef.current.load();
+        audioRef.current.play();
+        setControlsPlaying(true);
+      }
+    } catch (error) {
+      console.error('Error playing previous queue item:', error);
+    }
+  };
+
+  const handleControlsNext = async () => {
+    if (!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1) return;
+    
+    // Go to next item in queue (same as playNextInQueue but manual)
+    const nextIndex = currentQueueIndex + 1;
+    setCurrentQueueIndex(nextIndex);
+    const nextItem = listeningQueue[nextIndex];
+    
+    try {
+      // Cleanup current audio
+      if (audioUrl) {
+        cleanupAudioUrl(audioUrl);
+      }
+      
+      const result = await generateSpeech(nextItem.content);
+      setAudioUrl(result.audioUrl);
+      setCurrentPlayingText(nextItem.content);
+      setCurrentPlayingSection(nextItem.id as PlayingSection);
+      setCurrentWordIndex(-1);
+      
+      // Auto-play next item
+      if (audioRef.current) {
+        audioRef.current.load();
+        audioRef.current.play();
+        setControlsPlaying(true);
+      }
+    } catch (error) {
+      console.error('Error playing next queue item:', error);
     }
   };
 
   const handleControlsShuffle = () => {
+    if (listeningQueue.length === 0) return;
+    
     setControlsShuffle(!controlsShuffle);
+    
+    // If shuffle is being turned on, shuffle the queue
+    if (!controlsShuffle) {
+      const currentItem = listeningQueue[currentQueueIndex];
+      const otherItems = listeningQueue.filter((_, index) => index !== currentQueueIndex);
+      
+      // Fisher-Yates shuffle for the remaining items
+      for (let i = otherItems.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [otherItems[i], otherItems[j]] = [otherItems[j], otherItems[i]];
+      }
+      
+      // Create new shuffled queue with current item first
+      const shuffledQueue = currentQueueIndex !== -1 ? [currentItem, ...otherItems] : otherItems;
+      setListeningQueue(shuffledQueue);
+      if (currentQueueIndex !== -1) {
+        setCurrentQueueIndex(0); // Current item is now first
+      }
+    }
   };
 
   const handleControlsRepeat = () => {
@@ -230,15 +338,24 @@ export default function ReadPage() {
     const draggedId = active.id.toString();
     
     if (draggedId === 'summary') {
+      const summaryContent = extractSummary(scrapedData.cleanText || scrapedData.text, 1000);
+      console.log('🔍 Queue Debug: Adding Summary to queue');
+      console.log(`📝 Queue Debug: Summary text length: ${summaryContent.length}`);
+      console.log(`📝 Queue Debug: Summary first 100 chars: "${summaryContent.substring(0, 100)}..."`);
+      
       addToQueue({
         id: 'summary',
         title: 'Summary',
-        content: extractSummary(scrapedData.cleanText || scrapedData.text, 1000)
+        content: summaryContent
       });
     } else if (draggedId.startsWith('section-')) {
       const sectionIndex = parseInt(draggedId.replace('section-', ''));
       const section = scrapedData.sections[sectionIndex];
       if (section) {
+        console.log(`🔍 Queue Debug: Adding Section ${sectionIndex} to queue`);
+        console.log(`📝 Queue Debug: Section text length: ${section.content.length}`);
+        console.log(`📝 Queue Debug: Section first 100 chars: "${section.content.substring(0, 100)}..."`);
+        
         addToQueue({
           id: draggedId,
           title: section.title,
@@ -248,51 +365,157 @@ export default function ReadPage() {
     }
   };
 
-  // Queue playback functionality
+  // Ultra-smooth queue playback with perfectly timed maximization
   const playQueue = async () => {
     if (listeningQueue.length === 0) return;
     
+    const firstItem = listeningQueue[0];
+    
+    // Start preloading state
+    setIsPreloading(true);
     setIsQueuePlaying(true);
     setCurrentQueueIndex(0);
     
-    for (let i = 0; i < listeningQueue.length; i++) {
-      setCurrentQueueIndex(i);
-      const item = listeningQueue[i];
+    try {
+      // Generate audio first to minimize loading time
+      const result = await generateSpeech(firstItem.content);
       
-      try {
-        const result = await generateSpeech(item.content);
-        setAudioUrl(result.audioUrl);
-        setCurrentPlayingText(item.content);
-        setCurrentPlayingSection(item.id as PlayingSection);
-        
-        // Wait for audio to finish
-        await new Promise<void>((resolve) => {
-          if (audioRef.current) {
-            const handleEnded = () => {
-              audioRef.current?.removeEventListener('ended', handleEnded);
-              resolve();
-            };
-            audioRef.current.addEventListener('ended', handleEnded);
-            audioRef.current.play();
-          } else {
-            resolve();
+      // Set audio state immediately
+      setAudioUrl(result.audioUrl);
+      setCurrentPlayingText(firstItem.content);
+      setCurrentPlayingSection(firstItem.id as PlayingSection);
+      setCurrentWordIndex(-1);
+      
+      // Update cache stats after generating audio
+      if (process.env.NODE_ENV === 'development') {
+        setCacheStats(getTTSCacheStats());
+      }
+      
+      // Generate word timings immediately when audio is ready
+      if (result.audioUrl) {
+        // Create a temporary audio element to get duration for word timing
+        const tempAudio = new Audio(result.audioUrl);
+        tempAudio.addEventListener('loadedmetadata', () => {
+          if (tempAudio.duration > 0) {
+            const timings = generateWordTimings(firstItem.content, tempAudio.duration);
+            setWordsData(timings);
           }
         });
-        
-        // Cleanup audio
-        if (result.audioUrl) {
-          cleanupAudioUrl(result.audioUrl);
-        }
-      } catch (error) {
-        console.error('Error playing queue item:', error);
+        tempAudio.load();
       }
+      
+      // Start transition after everything is ready
+      setIsPreloading(false);
+      setIsTransitioning(true);
+      
+      // Maximize with perfect timing using RAF for smoother animation
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setIsMaximized(true);
+          
+          // Complete transition and start playback
+          setTimeout(() => {
+            setIsTransitioning(false);
+            
+            // Ensure audio is ready and start playback
+            if (audioRef.current) {
+              audioRef.current.load();
+              
+              // Wait for audio to be ready before playing
+              const playWhenReady = () => {
+                if (audioRef.current && audioRef.current.readyState >= 2) {
+                  audioRef.current.play().catch(console.debug);
+                  setControlsPlaying(true);
+                } else {
+                  // Audio not ready yet, wait a bit more
+                  setTimeout(playWhenReady, 50);
+                }
+              };
+              
+              playWhenReady();
+            }
+          }, 200); // Slightly longer to ensure animation completes
+        });
+      });
+      
+    } catch (error) {
+      console.error('Error playing first queue item:', error);
+      setIsQueuePlaying(false);
+      setCurrentQueueIndex(-1);
+      setIsMaximized(false);
+      setIsTransitioning(false);
+      setIsPreloading(false);
+    }
+  };
+
+  // Handle automatic queue progression
+  const playNextInQueue = useCallback(async () => {
+    if (!isQueuePlaying || currentQueueIndex === -1) return;
+    
+    // Handle repeat functionality
+    if (controlsRepeat) {
+      // Repeat current item
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play();
+        setControlsPlaying(true);
+      }
+      return;
     }
     
-    setIsQueuePlaying(false);
-    setCurrentQueueIndex(-1);
-    setCurrentPlayingSection(null);
-    setCurrentPlayingText('');
-  };
+    const nextIndex = currentQueueIndex + 1;
+    if (nextIndex >= listeningQueue.length) {
+      // Queue finished - stop everything
+      setIsQueuePlaying(false);
+      setCurrentQueueIndex(-1);
+      setCurrentPlayingSection(null);
+      setCurrentPlayingText('');
+      setCurrentWordIndex(-1);
+      setIsMaximized(false);
+      setControlsPlaying(false);
+      setControlsProgress(0);
+      setControlsCurrentTime(0);
+      return;
+    }
+    
+    // Move to next item
+    setCurrentQueueIndex(nextIndex);
+    const nextItem = listeningQueue[nextIndex];
+    
+    try {
+      // Cleanup previous audio
+      if (audioUrl) {
+        cleanupAudioUrl(audioUrl);
+      }
+      
+      const result = await generateSpeech(nextItem.content);
+      setAudioUrl(result.audioUrl);
+      setCurrentPlayingText(nextItem.content);
+      setCurrentPlayingSection(nextItem.id as PlayingSection);
+      setCurrentWordIndex(-1); // Reset word highlighting
+      
+      // Update cache stats after generating audio
+      if (process.env.NODE_ENV === 'development') {
+        setCacheStats(getTTSCacheStats());
+      }
+      
+      // Reset controls for new track
+      setControlsCurrentTime(0);
+      setControlsProgress(0);
+      
+      // Auto-play next item
+      if (audioRef.current) {
+        audioRef.current.load();
+        audioRef.current.play();
+        setControlsPlaying(true);
+      }
+    } catch (error) {
+      console.error('Error playing next queue item:', error);
+      setIsQueuePlaying(false);
+      setCurrentQueueIndex(-1);
+      setControlsPlaying(false);
+    }
+  }, [isQueuePlaying, currentQueueIndex, listeningQueue, audioUrl, controlsRepeat, cleanupAudioUrl, generateSpeech]);
 
   // Optimized Draggable Card Component
   const DraggableCard = React.memo(({ id, children }: { id: string; children: React.ReactNode }) => {
@@ -333,25 +556,25 @@ export default function ReadPage() {
   // Drag Overlay Component for smooth dragging
   const DragOverlayCard = ({ item }: { item: { id: string; title: string; content: string } }) => {
     return (
-      <div className="w-full bg-white border-2 border-black rounded-xl p-5 h-56 flex flex-col shadow-2xl transform rotate-3 scale-110 gpu-accelerated">
-        <div className="flex items-center justify-between mb-3">
+      <div className="w-full drag-overlay-enhanced rounded-xl p-6 h-48 flex flex-col shadow-2xl gpu-accelerated">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-              item.id === 'summary' ? 'bg-blue-500' : 'bg-green-500'
+            <div className={`w-3 h-3 rounded-full flex-shrink-0 shadow-lg ${
+              item.id === 'summary' ? 'bg-gradient-to-r from-white/90 to-white/60' : 'bg-gradient-to-r from-white/80 to-white/50'
             }`}></div>
-            <h3 className="text-base font-semibold text-black truncate">
+            <h3 className="text-sm font-semibold text-white truncate font-mono-enhanced">
               {item.title}
             </h3>
           </div>
-          <div className="p-2.5 bg-neutral-100 rounded-lg">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <div className="p-2 glass-card rounded-lg neon-glow">
+            <svg className="w-4 h-4 text-white/90" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
             </svg>
           </div>
         </div>
         <div className="flex-1 overflow-hidden">
-          <p className="text-sm text-neutral-600 leading-relaxed line-clamp-7">
-            {item.content.length > 280 ? item.content.substring(0, 280) + '...' : item.content}
+          <p className="text-base text-white/80 leading-[1.5] line-clamp-3 font-mono-enhanced">
+            {item.content.length > 150 ? item.content.substring(0, 150) + '...' : item.content}
           </p>
         </div>
       </div>
@@ -370,23 +593,23 @@ export default function ReadPage() {
       <div
         ref={setNodeRef}
         className={`
-          w-full min-h-[600px] lg:min-h-[700px] xl:min-h-[737px] bg-white border-2 rounded-xl p-6 
-          gpu-accelerated transition-all duration-300 ease-out flex flex-col shadow-sm
+          w-full min-h-[600px] lg:min-h-[700px] xl:min-h-[737px] queue-zone-enhanced rounded-xl p-6 
+          gpu-accelerated flex flex-col
           ${isOver 
-            ? 'border-black bg-gradient-to-br from-blue-50 to-green-50 scale-[1.02] shadow-xl' 
+            ? 'drag-over scale-105' 
             : isDragActive
-              ? 'border-blue-300 bg-blue-25 scale-[1.01]'
-              : 'border-neutral-200 hover:border-neutral-400'
+              ? 'scale-102 border-white/30'
+              : ''
           }
         `}
         style={{ willChange: 'transform, background-color, border-color' }}
       >
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-black">🎧 Listening Queue</h3>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-headline text-gradient font-mono-enhanced">🎧 Listening Queue</h3>
           {listeningQueue.length > 0 && (
             <button
               onClick={clearQueue}
-              className="text-sm text-neutral-400 hover:text-red-500 transition-colors"
+              className="text-sm text-white/50 hover:text-red-400 transition-all duration-300 btn-premium px-3 py-1 rounded font-mono-enhanced"
             >
               Clear
             </button>
@@ -394,41 +617,108 @@ export default function ReadPage() {
         </div>
 
         {listeningQueue.length === 0 ? (
-          <div className={`flex flex-col items-center justify-center flex-1 text-sm transition-all duration-200 ${
-            isOver ? 'text-black' : 'text-neutral-400'
+          <div className={`flex flex-col items-center justify-center flex-1 text-sm transition-all duration-500 ${
+            isOver ? 'text-white scale-110' : 'text-white/60'
           }`}>
-            <div className="text-6xl mb-6">📥</div>
-            <div className="text-xl font-semibold mb-3 text-center">Drag sections here to queue them</div>
-            <div className="text-sm text-neutral-500 text-center px-4">Build your custom listening experience by dragging any section from the left</div>
-            {isOver && <div className="text-lg mt-6 text-neutral-600 font-semibold animate-pulse">Drop to add to queue</div>}
+            <div className="text-8xl mb-8 animate-float-gentle">📥</div>
+            <div className="text-2xl font-semibold mb-4 text-center font-mono-enhanced text-gradient">Drag sections here to queue them</div>
+            <div className="text-sm text-white/50 text-center px-6 font-mono-enhanced leading-relaxed">Build your custom listening experience by dragging any section from the left</div>
+            {isOver && (
+              <div className="text-xl mt-8 text-white font-bold animate-pulse font-mono-enhanced neon-glow">
+                ✨ Drop to add to queue ✨
+              </div>
+            )}
           </div>
         ) : (
           <>
-            <div className="flex-1 space-y-4 mb-6 overflow-y-auto">
+            {/* Currently Playing Item - Maximized */}
+            {currentQueueIndex !== -1 && isQueuePlaying && listeningQueue[currentQueueIndex] && (
+              <div className="mb-8 glass-card rounded-xl p-8 neon-glow animate-float-gentle border-2 border-white/30">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-4 h-4 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
+                  <span className="text-lg font-semibold font-mono-enhanced text-gradient">Now Playing</span>
+                </div>
+                <h3 className="text-2xl font-bold text-white mb-6 font-mono-enhanced">
+                  {listeningQueue[currentQueueIndex].title}
+                </h3>
+                
+                {/* Word-by-word highlighting display */}
+                <div className="glass-card p-6 rounded-lg mb-6 max-h-48 overflow-y-auto">
+                  <div className="text-lg leading-relaxed font-mono-enhanced">
+                    {wordsData.length > 0 ? (
+                      wordsData.map((wordData, index) => (
+                        <span
+                          key={index}
+                          ref={currentWordIndex === index ? highlightedWordRef : null}
+                          className={`word-highlight inline-block ${
+                            wordData.isWhitespace 
+                              ? '' 
+                              : currentWordIndex === index && isPlaying
+                                ? 'active'
+                                : currentWordIndex > index
+                                  ? 'text-white/60'
+                                  : 'text-white/80 hover:text-white/90'
+                          } ${!wordData.isWhitespace ? 'cursor-pointer px-1 py-0.5 rounded' : ''}`}
+                          onClick={() => !wordData.isWhitespace && handleWordClick(index)}
+                        >
+                          {wordData.word}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-white/80">
+                        {listeningQueue[currentQueueIndex].content}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Progress for current item */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between text-white/70 text-xs mb-2 font-mono-enhanced">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(duration)}</span>
+                  </div>
+                  <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-white/90 to-white/60 rounded-full transition-all duration-300"
+                      style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Queue List */}
+            <div className="flex-1 space-y-3 mb-8 overflow-y-auto">
+              <h4 className="text-lg font-semibold text-white/70 mb-4 font-mono-enhanced">Queue ({listeningQueue.length} items)</h4>
               {listeningQueue.map((item, index) => (
                 <div
                   key={item.id}
-                  className={`p-4 rounded-xl text-sm transition-all duration-200 flex items-start justify-between ${
+                  className={`glass-card p-4 rounded-xl text-sm transition-all duration-300 flex items-start justify-between micro-bounce ${
                     currentQueueIndex === index && isQueuePlaying
-                      ? 'bg-neutral-100 text-black border border-neutral-200'
-                      : 'bg-neutral-50 text-neutral-600 hover:bg-neutral-100'
+                      ? 'bg-white/10 text-white border border-white/40 neon-glow scale-105'
+                      : 'text-white/80 hover:bg-white/5'
                   }`}
                 >
                   <div className="flex-1 min-w-0">
-                    {currentQueueIndex === index && isQueuePlaying && (
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                        <span className="text-xs text-green-600 font-medium">Now playing...</span>
-                      </div>
-                    )}
-                    <div className="font-semibold text-lg truncate mb-2">{item.title}</div>
-                    <div className="text-sm text-neutral-500 leading-relaxed">
-                      {item.content.slice(0, 120)}...
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs text-white/50 font-mono-enhanced">#{index + 1}</span>
+                      {currentQueueIndex === index && isQueuePlaying && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
+                          <span className="text-xs text-white/90 font-medium font-mono-enhanced">Playing</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="font-semibold text-sm truncate mb-2 font-mono-enhanced">{item.title}</div>
+                    <div className="text-sm text-white/60 leading-relaxed font-mono-enhanced">
+                      {item.content.slice(0, 80)}...
                     </div>
                   </div>
                   <button
                     onClick={() => removeFromQueue(item.id)}
-                    className="ml-3 p-2 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
+                    className="ml-4 btn-premium p-2 rounded-lg transition-all duration-300 flex-shrink-0 hover:scale-110 micro-bounce text-white/60 hover:text-red-400"
+                    disabled={currentQueueIndex === index && isQueuePlaying}
                   >
                     ✕
                   </button>
@@ -436,42 +726,46 @@ export default function ReadPage() {
               ))}
             </div>
 
-            <button
-              onClick={playQueue}
-              disabled={isQueuePlaying}
-              className="w-full bg-neutral-100 text-black rounded-xl py-5 px-6 text-xl font-bold transition-all duration-200 hover:bg-neutral-200 active:bg-neutral-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-            >
-              {isQueuePlaying ? '⏸️ Playing Queue...' : '▶️ Play Queue'}
-            </button>
+
           </>
         )}
 
         {/* Playback Control Bar */}
-        <div className="mt-6 bg-neutral-50 border border-neutral-200 rounded-xl p-4">
+        <div className="mt-8 glass-card rounded-xl p-6 neon-glow">
           {/* Progress Bar */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between text-neutral-600 text-xs mb-2">
+          <div className="mb-6">
+            <div className="flex items-center justify-between text-white/70 text-xs mb-3 font-mono-enhanced">
               <span>{formatControlsTime(controlsCurrentTime)}</span>
-              <span>{formatControlsTime(controlsTotalTime)}</span>
+              <span>{formatControlsTime(duration || 0)}</span>
             </div>
-            <div className="w-full h-1 bg-neutral-200 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden progress-enhanced relative cursor-pointer"
+                 onClick={(e) => {
+                   if (audioRef.current && duration > 0) {
+                     const rect = e.currentTarget.getBoundingClientRect();
+                     const clickX = e.clientX - rect.left;
+                     const percentage = clickX / rect.width;
+                     const seekTime = percentage * duration;
+                     audioRef.current.currentTime = seekTime;
+                   }
+                 }}>
               <div 
-                className="h-full bg-black rounded-full transition-all duration-200"
+                className="h-full bg-gradient-to-r from-white/90 to-white/60 rounded-full transition-all duration-300 shadow-lg"
                 style={{ width: `${controlsProgress}%` }}
               />
             </div>
           </div>
 
           {/* Control Buttons */}
-          <div className="flex items-center justify-center gap-6">
+          <div className="flex items-center justify-center gap-8">
             {/* Shuffle */}
             <button
               onClick={handleControlsShuffle}
-              className={`p-2 rounded-full transition-all duration-200 ${
-                controlsShuffle ? 'bg-neutral-300 text-black' : 'text-neutral-600 hover:bg-neutral-200 hover:text-black active:bg-neutral-300'
+              disabled={listeningQueue.length === 0}
+              className={`p-3 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
+                controlsShuffle ? 'bg-white/20 text-white neon-glow' : 'text-white/60 hover:bg-white/10 hover:text-white'
               }`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h6l4 4-4 4H4m16-8v8a4 4 0 01-8 0V8a4 4 0 018 0zM4 20h6l4-4-4-4H4" />
               </svg>
             </button>
@@ -479,9 +773,10 @@ export default function ReadPage() {
             {/* Previous */}
             <button
               onClick={handleControlsPrevious}
-              className="p-2 text-neutral-600 hover:bg-neutral-200 hover:text-black active:bg-neutral-300 rounded-full transition-all duration-200"
+              disabled={!isQueuePlaying || currentQueueIndex <= 0}
+              className="p-3 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
               </svg>
             </button>
@@ -489,14 +784,15 @@ export default function ReadPage() {
             {/* Play/Pause */}
             <button
               onClick={handleControlsPlayPause}
-              className="p-3 bg-neutral-100 text-black rounded-full hover:bg-neutral-200 active:bg-neutral-300 transition-all duration-200"
+              disabled={listeningQueue.length === 0 && !audioUrl}
+              className="p-4 btn-premium rounded-full transition-all duration-300 hover:scale-110 neon-glow shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {controlsPlaying ? (
-                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+              {controlsPlaying || isPlaying ? (
+                <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
                 </svg>
               ) : (
-                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M8 5v14l11-7z" />
                 </svg>
               )}
@@ -505,9 +801,10 @@ export default function ReadPage() {
             {/* Next */}
             <button
               onClick={handleControlsNext}
-              className="p-2 text-neutral-600 hover:bg-neutral-200 hover:text-black active:bg-neutral-300 rounded-full transition-all duration-200"
+              disabled={!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1}
+              className="p-3 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
               </svg>
             </button>
@@ -515,11 +812,12 @@ export default function ReadPage() {
             {/* Repeat */}
             <button
               onClick={handleControlsRepeat}
-              className={`p-2 rounded-full transition-all duration-200 ${
-                controlsRepeat ? 'bg-neutral-300 text-black' : 'text-neutral-600 hover:bg-neutral-200 hover:text-black active:bg-neutral-300'
+              disabled={listeningQueue.length === 0}
+              className={`p-3 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
+                controlsRepeat ? 'bg-white/20 text-white neon-glow' : 'text-white/60 hover:bg-white/10 hover:text-white'
               }`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
@@ -529,6 +827,259 @@ export default function ReadPage() {
     );
   });
   ListeningQueueDropZone.displayName = 'ListeningQueueDropZone';
+
+  // Maximized Player Component
+  const MaximizedPlayer = () => {
+    if ((!isMaximized && !isTransitioning && !isPreloading) || currentQueueIndex === -1 || !listeningQueue[currentQueueIndex]) return null;
+
+    const currentItem = listeningQueue[currentQueueIndex];
+
+    const handleClose = () => {
+      setIsTransitioning(true);
+      // Start the close animation
+      setTimeout(() => {
+        setIsMaximized(false);
+        setIsTransitioning(false);
+        setIsPreloading(false);
+      }, 300); // Match animation duration
+    };
+
+    // Don't render content during preloading to prevent flash
+    if (isPreloading) {
+      return (
+        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center animate-fade-in">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-6"></div>
+            <div className="text-white text-2xl font-mono-enhanced animate-pulse mb-2">
+              Preparing Audio Experience
+            </div>
+            <div className="text-white/70 text-sm font-mono-enhanced">
+              {currentItem.title}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div 
+        className={`fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center p-8 gpu-accelerated ${
+          isMaximized && !isTransitioning ? 'animate-zoom-in' : isTransitioning ? 'animate-fade-out' : ''
+        }`}
+        style={{
+          // Ensure initial state is properly set for smooth animation
+          transform: isMaximized ? 'translateZ(0)' : 'translateZ(0) scale(0.85) translateY(30px)',
+          opacity: isMaximized ? 1 : 0,
+          transition: !isMaximized && !isTransitioning ? 'none' : undefined
+        }}
+      >
+        {/* Close/Minimize Button */}
+        <button
+          onClick={handleClose}
+          className="absolute top-8 right-8 z-10 w-14 h-14 rounded-full glass-card hover:bg-white/20 transition-all duration-300 hover:scale-110 neon-glow animate-content-slide"
+        >
+          <svg className="w-7 h-7 text-white mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        {/* Maximized Content */}
+        <div className="w-full max-w-7xl mx-auto animate-content-slide">
+          {/* Header */}
+          <div className="text-center mb-16">
+            <div className="flex items-center justify-center gap-6 mb-8">
+              <div className="w-8 h-8 bg-red-500 rounded-full animate-pulse shadow-2xl neon-glow"></div>
+              <span className="text-3xl font-bold font-mono-enhanced text-gradient">Now Playing</span>
+            </div>
+            <h1 className="text-7xl font-bold text-white mb-6 font-mono-enhanced leading-tight max-w-5xl mx-auto">
+              {currentItem.title}
+            </h1>
+            <div className="flex items-center justify-center gap-12 text-xl text-white/70">
+              <span className="glass-card px-6 py-3 rounded-xl font-mono-enhanced neon-glow">
+                Track {currentQueueIndex + 1} of {listeningQueue.length}
+              </span>
+              <span className="glass-card px-6 py-3 rounded-xl font-mono-enhanced neon-glow">
+                {Math.ceil(currentItem.content.split(' ').length / 200)} min read
+              </span>
+              <span className="glass-card px-6 py-3 rounded-xl font-mono-enhanced neon-glow">
+                {wordsData.length > 0 && currentWordIndex !== -1 
+                  ? `${Math.round((currentWordIndex / wordsData.length) * 100)}% complete`
+                  : 'Loading...'
+                }
+              </span>
+            </div>
+          </div>
+
+          {/* Word-by-word Text Display */}
+          <div className="glass-card rounded-3xl p-16 mb-16 max-h-[45vh] overflow-y-auto neon-glow stable-ui">
+            <div className="text-4xl leading-[1.8] font-mono-enhanced text-center">
+              {wordsData.length > 0 ? (
+                wordsData.map((wordData, index) => (
+                  <span
+                    key={index}
+                    ref={currentWordIndex === index ? highlightedWordRef : null}
+                    className={`word-highlight inline-block mx-1 ${
+                      wordData.isWhitespace 
+                        ? '' 
+                        : currentWordIndex === index && isPlaying
+                          ? 'active'
+                          : currentWordIndex > index
+                            ? 'text-white/40'
+                            : 'text-white/80 hover:text-white/90'
+                    } ${!wordData.isWhitespace ? 'cursor-pointer px-2 py-1 rounded-lg' : ''}`}
+                    onClick={() => !wordData.isWhitespace && handleWordClick(index)}
+                  >
+                    {wordData.word}
+                  </span>
+                ))
+              ) : (
+                <span className="text-white/80 animate-pulse">
+                  Generating audio and preparing word tracking...
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Enhanced Control Center */}
+          <div className="glass-card rounded-3xl p-12 neon-glow">
+            {/* Progress Section */}
+            <div className="mb-12">
+              <div className="flex items-center justify-between text-white/70 text-xl mb-4 font-mono-enhanced">
+                <span className="glass-card px-4 py-2 rounded-lg">{formatTime(currentTime)}</span>
+                <span className="text-white font-semibold text-2xl">
+                  {wordsData.length > 0 && currentWordIndex !== -1 
+                    ? `Word ${wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} / ${wordsData.filter(word => !word.isWhitespace).length}`
+                    : 'Audio Loading...'
+                  }
+                </span>
+                <span className="glass-card px-4 py-2 rounded-lg">{formatTime(duration)}</span>
+              </div>
+              
+              <div className="relative w-full h-3 bg-white/10 rounded-full overflow-hidden cursor-pointer group"
+                   onClick={(e) => {
+                     if (audioRef.current && duration > 0) {
+                       const rect = e.currentTarget.getBoundingClientRect();
+                       const clickX = e.clientX - rect.left;
+                       const percentage = clickX / rect.width;
+                       const seekTime = percentage * duration;
+                       audioRef.current.currentTime = seekTime;
+                     }
+                   }}>
+                <div 
+                  className="h-full bg-gradient-to-r from-white via-white/90 to-white/80 rounded-full transition-all duration-300 shadow-2xl"
+                  style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                />
+                <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-all duration-200 rounded-full"></div>
+              </div>
+            </div>
+
+            {/* Enhanced Control Buttons */}
+            <div className="flex items-center justify-center gap-12">
+              {/* Shuffle */}
+              <button
+                onClick={handleControlsShuffle}
+                disabled={listeningQueue.length === 0}
+                className={`w-16 h-16 rounded-full transition-all duration-300 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed ${
+                  controlsShuffle ? 'bg-white/20 text-white neon-glow' : 'glass-card text-white/70 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <svg className="w-8 h-8 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h6l4 4-4 4H4m16-8v8a4 4 0 01-8 0V8a4 4 0 018 0zM4 20h6l4-4-4-4H4" />
+                </svg>
+              </button>
+
+              {/* Previous */}
+              <button
+                onClick={handleControlsPrevious}
+                disabled={!isQueuePlaying || currentQueueIndex <= 0}
+                className="w-20 h-20 rounded-full glass-card hover:bg-white/20 transition-all duration-300 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <svg className="w-10 h-10 text-white mx-auto" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+                </svg>
+              </button>
+
+              {/* Play/Pause - Large Center Button */}
+              <button
+                onClick={handleControlsPlayPause}
+                disabled={listeningQueue.length === 0 && !audioUrl}
+                className="w-32 h-32 rounded-full btn-premium transition-all duration-300 hover:scale-105 neon-glow shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isPlaying ? (
+                  <svg className="w-16 h-16 text-white mx-auto" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                  </svg>
+                ) : (
+                  <svg className="w-16 h-16 text-white mx-auto ml-2" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Next */}
+              <button
+                onClick={handleControlsNext}
+                disabled={!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1}
+                className="w-20 h-20 rounded-full glass-card hover:bg-white/20 transition-all duration-300 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <svg className="w-10 h-10 text-white mx-auto" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+                </svg>
+              </button>
+
+              {/* Repeat */}
+              <button
+                onClick={handleControlsRepeat}
+                disabled={listeningQueue.length === 0}
+                className={`w-16 h-16 rounded-full transition-all duration-300 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed ${
+                  controlsRepeat ? 'bg-white/20 text-white neon-glow' : 'glass-card text-white/70 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <svg className="w-8 h-8 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Additional Info */}
+            <div className="mt-8 flex items-center justify-center gap-8 text-white/60">
+              <span className="glass-card px-4 py-2 rounded-lg text-sm font-mono-enhanced">
+                Speed: {playbackRate}x
+              </span>
+              {controlsShuffle && (
+                <span className="glass-card px-4 py-2 rounded-lg text-sm font-mono-enhanced text-blue-400">
+                  🔀 Shuffled
+                </span>
+              )}
+              {controlsRepeat && (
+                <span className="glass-card px-4 py-2 rounded-lg text-sm font-mono-enhanced text-green-400">
+                  🔁 Repeat On
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Handle audio end for queue progression
+  useEffect(() => {
+    const audioElement = audioRef.current;
+    if (!audioElement) return;
+
+    const handleAudioEnd = () => {
+      setIsPlaying(false);
+      setCurrentWordIndex(-1);
+      // If queue is playing, move to next item automatically
+      if (isQueuePlaying) {
+        playNextInQueue();
+      }
+    };
+
+    audioElement.addEventListener('ended', handleAudioEnd);
+    return () => audioElement.removeEventListener('ended', handleAudioEnd);
+  }, [isQueuePlaying, playNextInQueue]);
 
   // Generate word timing data based on text and audio duration with improved accuracy
   const generateWordTimings = useCallback((text: string, audioDuration: number): WordData[] => {
@@ -600,59 +1151,85 @@ export default function ReadPage() {
     return wordTimings;
   }, []);
 
-  // Find current word based on audio time
+  // Enhanced word finding with precise timing and lookahead
   const findCurrentWordIndex = useCallback((currentTime: number): number => {
-    if (wordsData.length === 0) return -1;
+    if (wordsData.length === 0 || currentTime < 0) return -1;
+    
+    // First, try to find exact match with small tolerance
+    for (let i = 0; i < wordsData.length; i++) {
+      const word = wordsData[i];
+      if (!word.isWhitespace) {
+        // Use a small lookahead for better sync (100ms ahead)
+        const lookaheadTime = currentTime + 0.1;
+        if (lookaheadTime >= word.startTime && currentTime <= word.endTime) {
+          return i;
+        }
+      }
+    }
+    
+    // If no exact match, find the most appropriate word
+    let bestIndex = -1;
+    let smallestDistance = Infinity;
     
     for (let i = 0; i < wordsData.length; i++) {
       const word = wordsData[i];
-      if (!word.isWhitespace && currentTime >= word.startTime && currentTime <= word.endTime) {
-        return i;
+      if (!word.isWhitespace) {
+        // Calculate distance with preference for upcoming words
+        let distance;
+        if (currentTime < word.startTime) {
+          // Upcoming word - prefer closer ones
+          distance = word.startTime - currentTime;
+        } else if (currentTime > word.endTime) {
+          // Past word - penalize more
+          distance = (currentTime - word.endTime) * 2;
+        } else {
+          // We're in the word timing - this should be the current word
+          distance = 0;
+        }
+        
+        if (distance < smallestDistance) {
+          smallestDistance = distance;
+          bestIndex = i;
+        }
       }
     }
     
-    // If not found, find the closest word
-    let closestIndex = -1;
-    let closestDistance = Infinity;
-    
-    wordsData.forEach((word, index) => {
-      if (!word.isWhitespace) {
-        const distance = Math.abs(word.startTime - currentTime);
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestIndex = index;
-        }
-      }
-    });
-    
-    return closestIndex;
+    return bestIndex;
   }, [wordsData]);
 
-  // Auto-scroll to current word
+  // Auto-scroll to current word with improved performance
   const scrollToCurrentWord = useCallback(() => {
-    if (highlightedWordRef.current && contentRef.current) {
+    if (highlightedWordRef.current && contentRef.current && isMaximized) {
       const wordElement = highlightedWordRef.current;
       const container = contentRef.current;
       
-      // Get the position of the word relative to the container
-      const wordRect = wordElement.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-      
-      // Calculate if we need to scroll
-      const wordTop = wordRect.top - containerRect.top;
-      const wordBottom = wordRect.bottom - containerRect.top;
-      const containerHeight = containerRect.height;
-      
-      // Only scroll if the word is not visible or near the edges
-      if (wordTop < 100 || wordBottom > containerHeight - 100) {
-        wordElement.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center',
-          inline: 'nearest'
-        });
+      // Only scroll in maximized mode and if element is available
+      try {
+        const wordRect = wordElement.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        
+        // Calculate scroll position with better thresholds
+        const wordTop = wordRect.top - containerRect.top;
+        const wordBottom = wordRect.bottom - containerRect.top;
+        const containerHeight = containerRect.height;
+        
+        // Only scroll if the word is significantly out of view (larger buffer)
+        if (wordTop < 150 || wordBottom > containerHeight - 150) {
+          // Use requestAnimationFrame for smoother scrolling
+          requestAnimationFrame(() => {
+            wordElement.scrollIntoView({
+              behavior: 'smooth',
+              block: 'center',
+              inline: 'nearest'
+            });
+          });
+        }
+      } catch (error) {
+        // Silently handle any scrolling errors to prevent UI issues
+        console.debug('Auto-scroll skipped:', error);
       }
     }
-  }, []);
+  }, [isMaximized]);
 
   const generateAudioForSection = useCallback(async (sectionType: PlayingSection, customText?: string) => {
     if (!scrapedData || !sectionType) return;
@@ -669,17 +1246,28 @@ export default function ReadPage() {
         textToSpeak = customText;
       } else if (sectionType === 'summary') {
         textToSpeak = extractSummary(scrapedData.cleanText || scrapedData.text, 1000);
+        console.log('🔍 Individual Debug: Playing Summary individually');
+        console.log(`📝 Individual Debug: Summary text length: ${textToSpeak.length}`);
+        console.log(`📝 Individual Debug: Summary first 100 chars: "${textToSpeak.substring(0, 100)}..."`);
       } else if (sectionType.startsWith('section-')) {
         const sectionIndex = parseInt(sectionType.replace('section-', ''));
         const section = scrapedData.sections[sectionIndex];
         if (section) {
           textToSpeak = section.content;
+          console.log(`🔍 Individual Debug: Playing Section ${sectionIndex} individually`);
+          console.log(`📝 Individual Debug: Section text length: ${textToSpeak.length}`);
+          console.log(`📝 Individual Debug: Section first 100 chars: "${textToSpeak.substring(0, 100)}..."`);
         }
       }
 
       setCurrentPlayingText(textToSpeak);
       const result = await generateSpeech(textToSpeak);
       setAudioUrl(result.audioUrl);
+      
+      // Update cache stats after generating audio
+      if (process.env.NODE_ENV === 'development') {
+        setCacheStats(getTTSCacheStats());
+      }
     } catch (error) {
       console.error('Failed to generate audio:', error);
       setAudioError(error instanceof Error ? error.message : 'Failed to generate audio');
@@ -695,23 +1283,57 @@ export default function ReadPage() {
     await generateAudioForSection('summary');
   }, [generateAudioForSection]);
 
-  // Update current word index based on audio time
+  // Ultra-responsive word index updates with zero delay
   useEffect(() => {
-    if (isPlaying && wordsData.length > 0) {
-      const newWordIndex = findCurrentWordIndex(currentTime);
-      if (newWordIndex !== currentWordIndex && newWordIndex !== -1) {
-        setCurrentWordIndex(newWordIndex);
-      }
+    if (isPlaying && wordsData.length > 0 && currentTime >= 0 && !isNaN(currentTime)) {
+      // Use requestAnimationFrame for the smoothest possible updates
+      const updateWordIndex = () => {
+        const newWordIndex = findCurrentWordIndex(currentTime);
+        
+        // Update immediately if we have a valid new index
+        if (newWordIndex !== currentWordIndex && 
+            newWordIndex !== -1 && 
+            newWordIndex < wordsData.length &&
+            !wordsData[newWordIndex]?.isWhitespace) {
+          setCurrentWordIndex(newWordIndex);
+        }
+      };
+      
+      // Use both immediate update and RAF for maximum responsiveness
+      updateWordIndex();
+      const rafId = requestAnimationFrame(updateWordIndex);
+      
+      return () => cancelAnimationFrame(rafId);
     }
   }, [currentTime, isPlaying, wordsData, findCurrentWordIndex, currentWordIndex]);
 
-  // Auto-scroll when current word changes
+  // Update cache stats in development
   useEffect(() => {
-    if (currentWordIndex !== -1 && isPlaying) {
-      // Small delay to ensure DOM is updated
-      setTimeout(scrollToCurrentWord, 100);
+    if (process.env.NODE_ENV === 'development') {
+      const updateCacheStats = () => {
+        const stats = getTTSCacheStats();
+        setCacheStats(stats);
+      };
+      
+      updateCacheStats();
+      
+      // Update cache stats after TTS operations
+      const interval = setInterval(updateCacheStats, 2000);
+      return () => clearInterval(interval);
     }
-  }, [currentWordIndex, isPlaying, scrollToCurrentWord]);
+  }, []);
+
+  // Auto-scroll when current word changes with debouncing
+  useEffect(() => {
+    if (currentWordIndex !== -1 && isPlaying && isMaximized) {
+      // Use requestAnimationFrame for better performance
+      const timeoutId = setTimeout(() => {
+        requestAnimationFrame(scrollToCurrentWord);
+      }, 50); // Reduced delay for better responsiveness
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [currentWordIndex, isPlaying, isMaximized, scrollToCurrentWord]);
 
   // Generate word timings when audio loads
   useEffect(() => {
@@ -721,10 +1343,30 @@ export default function ReadPage() {
     }
   }, [duration, currentPlayingText, generateWordTimings]);
 
-  // Set playback rate when audio loads
+  // Set playback rate when audio loads with error handling
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackRate;
+    if (audioRef.current && audioUrl) {
+      try {
+        // Only set playback rate if audio is ready
+        if (audioRef.current.readyState >= 1) {
+          audioRef.current.playbackRate = playbackRate;
+        } else {
+          // Wait for audio to be ready
+          const handleCanPlay = () => {
+            if (audioRef.current) {
+              audioRef.current.playbackRate = playbackRate;
+            }
+          };
+          audioRef.current.addEventListener('canplay', handleCanPlay, { once: true });
+          return () => {
+            if (audioRef.current) {
+              audioRef.current.removeEventListener('canplay', handleCanPlay);
+            }
+          };
+        }
+      } catch (error) {
+        console.debug('Playback rate setting skipped:', error);
+      }
     }
   }, [audioUrl, playbackRate]);
 
@@ -766,6 +1408,22 @@ export default function ReadPage() {
   };
 
   const handlePlayPause = () => {
+    // If there are items in the queue and nothing is currently playing, start the queue
+    if (listeningQueue.length > 0 && !audioUrl && !isQueuePlaying) {
+      playQueue();
+      return;
+    }
+
+    // If queue is playing, pause/resume the current audio
+    if (isQueuePlaying && audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+      return;
+    }
+
     if (!audioRef.current || !audioUrl) return;
 
     if (isPlaying) {
@@ -783,6 +1441,17 @@ export default function ReadPage() {
     setCurrentWordIndex(-1);
     setCurrentPlayingSection(null);
     setCurrentPlayingText('');
+    
+    // Stop queue playback if active
+    if (isQueuePlaying) {
+      setIsQueuePlaying(false);
+      setCurrentQueueIndex(-1);
+      setIsMaximized(false); // Close maximized view
+      setControlsPlaying(false);
+      setControlsProgress(0);
+      setControlsCurrentTime(0);
+    }
+    
     if (audioUrl) {
       cleanupAudioUrl(audioUrl);
       setAudioUrl(null);
@@ -822,6 +1491,13 @@ export default function ReadPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Handle cache clearing (development only)
+  const handleClearCache = () => {
+    if (clearTTSCache()) {
+      setCacheStats(getTTSCacheStats());
+    }
+  };
+
 
 
   if (!scrapedData) {
@@ -842,11 +1518,11 @@ export default function ReadPage() {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="min-h-screen bg-white text-black [&_*]:text-black">
+      <div className="min-h-screen text-white">
         <style jsx>{`
-          .line-clamp-7 {
+          .line-clamp-3 {
             display: -webkit-box;
-            -webkit-line-clamp: 7;
+            -webkit-line-clamp: 3;
             -webkit-box-orient: vertical;
             overflow: hidden;
           }
@@ -859,46 +1535,95 @@ export default function ReadPage() {
           onLoadedMetadata={() => {
             if (audioRef.current) {
               setDuration(audioRef.current.duration);
-              // Removed auto-play - user now controls playback
+              // Set playback rate immediately when metadata loads
+              try {
+                audioRef.current.playbackRate = playbackRate;
+              } catch (error) {
+                console.debug('Playback rate setting skipped during load:', error);
+              }
             }
           }}
-          onPlay={() => setIsPlaying(true)}
+          onLoadedData={() => {
+            // Audio is fully loaded and ready to play
+            if (audioRef.current && isQueuePlaying && currentQueueIndex !== -1) {
+              // Generate word timings as soon as audio is ready
+              if (currentPlayingText && audioRef.current.duration > 0) {
+                const timings = generateWordTimings(currentPlayingText, audioRef.current.duration);
+                setWordsData(timings);
+              }
+            }
+          }}
+          onCanPlay={() => {
+            // Audio can start playing - ensure playback rate is set
+            if (audioRef.current) {
+              try {
+                audioRef.current.playbackRate = playbackRate;
+              } catch (error) {
+                console.debug('Playback rate setting skipped during canplay:', error);
+              }
+            }
+          }}
+          onPlay={() => {
+            setIsPlaying(true);
+            // Reset word index to start fresh
+            if (currentWordIndex === -1 && wordsData.length > 0) {
+              setCurrentWordIndex(0);
+            }
+          }}
           onPause={() => setIsPlaying(false)}
           onTimeUpdate={() => {
-            if (audioRef.current) {
+            if (audioRef.current && !isNaN(audioRef.current.currentTime)) {
               setCurrentTime(audioRef.current.currentTime);
             }
           }}
           onEnded={() => {
-            setIsPlaying(false);
-            setCurrentWordIndex(-1);
-            // Keep the section and text state so user can replay if needed
+            // Audio end is handled by useEffect above for better queue management
           }}
           preload="auto"
         />
       )}
 
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-border/40 bg-white">
+      <header className="sticky top-0 z-50 glass-card border-b border-white/10">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
             <button
               onClick={handleBack}
-              className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-2 text-white/70 hover:text-white transition-all duration-300 hover:scale-105 group"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 group-hover:transform group-hover:-translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
               </svg>
-              <span>Back</span>
+              <span className="font-mono-enhanced text-sm font-medium">Back</span>
             </button>
             
             <div className="flex items-center gap-4">
-              <div className="text-sm text-muted-foreground hidden sm:block">
+              {/* Development Cache Stats */}
+              {process.env.NODE_ENV === 'development' && cacheStats?.enabled && (
+                <div className="flex items-center gap-3 text-xs">
+                  <div className="glass-card px-3 py-1 rounded-lg">
+                    <span className="text-white/70 font-mono-enhanced">
+                      TTS Cache: {cacheStats.count} items ({cacheStats.size})
+                    </span>
+                  </div>
+                  {cacheStats.count > 0 && (
+                    <button
+                      onClick={handleClearCache}
+                      className="text-white/50 hover:text-red-400 transition-colors duration-300 font-mono-enhanced"
+                      title="Clear TTS cache"
+                    >
+                      🗑️
+                    </button>
+                  )}
+                </div>
+              )}
+              
+              <div className="text-sm text-white/50 hidden sm:block font-mono-enhanced">
                 {currentUrl && new URL(currentUrl).hostname}
               </div>
               <button
                 onClick={handleStartOver}
-                className="px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:bg-accent transition-colors"
+                className="btn-premium px-6 py-2 rounded-lg font-mono-enhanced text-sm"
               >
                 New Site
               </button>
@@ -910,27 +1635,27 @@ export default function ReadPage() {
 
 
       {/* Main Content */}
-      <main ref={contentRef} className="min-h-screen bg-white">
+      <main ref={contentRef} className="min-h-screen">
         {/* Container with proper margins */}
         <div className="max-w-[1800px] mx-auto px-8 lg:px-12 py-12">
           
           {/* Article Header - Full Width */}
-          <div className="mb-12">
+          <div className="mb-16 animate-float-gentle">
             <div className="max-w-5xl">
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-6 text-black leading-tight">
+              <h1 className="text-display text-gradient mb-8 leading-tight">
                 {scrapedData.title}
               </h1>
             
               {currentUrl && (
-                <div className="flex items-center gap-2 text-sm text-neutral-500 mb-6">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="flex items-center gap-3 text-sm text-white/60 mb-8 group hover:text-white/80 transition-colors duration-300">
+                  <svg className="w-4 h-4 group-hover:scale-110 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                   </svg>
                   <a 
                     href={currentUrl} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="hover:text-black transition-colors"
+                    className="font-mono-enhanced hover:text-white neon-glow transition-all duration-300"
                   >
                     {currentUrl}
                   </a>
@@ -938,40 +1663,39 @@ export default function ReadPage() {
               )}
 
               {/* Content Stats */}
-              <div className="flex flex-wrap gap-6 text-sm text-neutral-500 mb-8">
-                <div className="flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span>{scrapedData.text.split(' ').length} words</span>
-                  {scrapedData.cleanText && scrapedData.cleanText !== scrapedData.text && (
-                    <span className="text-blue-600 text-xs">
-                      ({scrapedData.cleanText.split(' ').length} optimized)
-                    </span>
+                              <div className="flex flex-wrap gap-8 text-sm text-white/70 mb-8">
+                  <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
+                    <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span className="font-mono-enhanced">{scrapedData.text.split(' ').length.toLocaleString()} words</span>
+                    {scrapedData.cleanText && scrapedData.cleanText !== scrapedData.text && (
+                      <span className="text-white/60 text-xs font-mono-enhanced">
+                        ({scrapedData.cleanText.split(' ').length.toLocaleString()} optimized)
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
+                    <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-mono-enhanced">~{Math.ceil(scrapedData.text.split(' ').length / 200)} min read</span>
+                  </div>
+                  <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
+                    <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    </svg>
+                    <span className="font-mono-enhanced">~{Math.ceil(estimateTextDuration(scrapedData.text) / 60)} min listen</span>
+                  </div>
+                  {audioUrl && (
+                    <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg neon-glow animate-pulse">
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12 7-12 6z" />
+                      </svg>
+                      <span className="font-mono-enhanced text-white">Audio ready</span>
+                    </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span>~{Math.ceil(scrapedData.text.split(' ').length / 200)} min read</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                  </svg>
-                  <span>~{Math.ceil(estimateTextDuration(scrapedData.text) / 60)} min listen</span>
-                </div>
-                {audioUrl && (
-                  <div className="flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12 7-12 6z" />
-                    </svg>
-                    <span>Audio ready</span>
-                  </div>
-                )}
-              </div>
-
 
             </div>
           </div>
@@ -986,61 +1710,37 @@ export default function ReadPage() {
                 
                 {/* Section Cards */}
                 {scrapedData.sections.slice(0, 5).map((section, index) => (
-                  <DraggableCard key={index} id={`section-${index}`}>
+                  !movedToQueue.has(`section-${index}`) && (
+                    <DraggableCard key={index} id={`section-${index}`}>
                     <div 
-                      className={`w-full bg-white border-2 rounded-xl p-5 flex flex-col transition-all duration-300 ease-in-out shadow-sm hover:shadow-md ${
-                        expandedBoxes.has(`section-${index}`) ? 'h-auto min-h-56' : 'h-56'
-                      } ${
+                      className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
                         currentPlayingSection === `section-${index}` 
-                          ? 'border-black bg-neutral-50 shadow-lg' 
-                          : 'border-neutral-200 hover:border-neutral-400'
+                          ? 'border-white/40 bg-white/8 animate-pulse' 
+                          : ''
                       }`}
                     >
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                          index % 3 === 0 ? 'bg-green-500' : 
-                          index % 3 === 1 ? 'bg-purple-500' : 'bg-orange-500'
+                        <div className={`w-3 h-3 rounded-full flex-shrink-0 shadow-lg ${
+                          index % 3 === 0 ? 'bg-gradient-to-r from-white/90 to-white/60' : 
+                          index % 3 === 1 ? 'bg-gradient-to-r from-white/80 to-white/50' : 'bg-gradient-to-r from-white/85 to-white/55'
                         }`}></div>
-                        <h3 className="text-base font-semibold text-black truncate">
+                        <h3 className="text-sm font-semibold text-white truncate font-mono-enhanced">
                           {section.title}
                         </h3>
                       </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        {needsExpansion(section.content) && (
-                          <button
-                            onClick={() => toggleBoxExpansion(`section-${index}`)}
-                            className="p-2 rounded-lg hover:bg-neutral-100 transition-colors duration-200"
-                          >
-                            <svg 
-                              className={`w-4 h-4 text-neutral-500 transition-transform duration-300 ${
-                                expandedBoxes.has(`section-${index}`) ? 'rotate-180' : ''
-                              }`} 
-                              fill="none" 
-                              stroke="currentColor" 
-                              viewBox="0 0 24 24"
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                        )}
+                      <div className="flex items-center gap-2 flex-shrink-0">
                         <button
                           onClick={() => generateAudioForSection(`section-${index}` as PlayingSection)}
                           disabled={isGeneratingAudio}
-                          className={`play-button relative p-2.5 rounded-lg transition-all duration-300 transform active:scale-95 hover:scale-105 ${
+                          className={`btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce ${
                             currentPlayingSection === `section-${index}`
-                              ? 'bg-neutral-300 text-black'
-                              : 'bg-neutral-100 text-black hover:bg-neutral-200 active:bg-neutral-300'
-                          } disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}
-                          onMouseDown={(e) => {
-                            e.currentTarget.classList.add('play-button-clicked');
-                            setTimeout(() => {
-                              e.currentTarget.classList.remove('play-button-clicked');
-                            }, 400);
-                          }}
+                              ? 'bg-white/20 text-white animate-pulse'
+                              : ''
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
                           {isGeneratingAudio && currentPlayingSection === `section-${index}` ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current"></div>
                           ) : (
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                               <path d="M8 5v14l11-7z" />
@@ -1049,20 +1749,14 @@ export default function ReadPage() {
                         </button>
                       </div>
                     </div>
-                    <div className={`flex-1 overflow-hidden transition-all duration-300 ${
-                      expandedBoxes.has(`section-${index}`) ? 'overflow-visible' : ''
-                    }`}>
-                      <p className={`text-sm text-neutral-600 leading-relaxed ${
-                        expandedBoxes.has(`section-${index}`) ? '' : 'line-clamp-7'
-                      }`}>
-                        {expandedBoxes.has(`section-${index}`)
-                          ? section.content
-                          : (section.content.length > 280 ? section.content.substring(0, 280) + '...' : section.content)
-                        }
+                    <div className="flex-1 overflow-hidden">
+                      <p className="text-base text-white/80 leading-[1.5] font-mono-enhanced line-clamp-3">
+                        {section.content.length > 150 ? section.content.substring(0, 150) + '...' : section.content}
                       </p>
                     </div>
                   </div>
                   </DraggableCard>
+                  )
                 ))}
 
 
@@ -1071,68 +1765,44 @@ export default function ReadPage() {
 
                 {/* Additional Sections (if more than 5) */}
                 {scrapedData.sections.length > 5 && (
-                  <div className="w-full bg-white border-2 border-neutral-200 rounded-xl p-5 h-56 flex flex-col justify-center items-center text-center hover:border-neutral-400 transition-all duration-200 shadow-sm hover:shadow-md">
-                    <div className="w-10 h-10 bg-neutral-100 rounded-full flex items-center justify-center mb-3">
-                      <svg className="w-5 h-5 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-full glass-card rounded-xl p-6 h-48 flex flex-col justify-center items-center text-center neon-glow micro-bounce">
+                    <div className="w-12 h-12 glass-card rounded-full flex items-center justify-center mb-4 neon-glow">
+                      <svg className="w-6 h-6 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                       </svg>
                     </div>
-                    <h3 className="text-base font-semibold text-black mb-2">More Sections</h3>
-                    <p className="text-sm text-neutral-600">
+                    <h3 className="text-sm font-semibold text-white mb-3 font-mono-enhanced">More Sections</h3>
+                    <p className="text-sm text-white/70 font-mono-enhanced">
                       +{scrapedData.sections.length - 5} additional sections available
                     </p>
                   </div>
                 )}
 
                 {/* Summary Card - Moved to bottom */}
-                {scrapedData.text && (
+                {scrapedData.text && !movedToQueue.has('summary') && (
                   <DraggableCard id="summary">
-                    <div className={`w-full bg-white border-2 rounded-xl p-5 flex flex-col transition-all duration-300 ease-in-out shadow-sm hover:shadow-md ${
-                      expandedBoxes.has('summary') ? 'h-auto min-h-56' : 'h-56'
-                    } ${
+                                        <div className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
                       currentPlayingSection === 'summary' 
-                        ? 'border-black bg-neutral-50 shadow-lg' 
-                        : 'border-neutral-200 hover:border-neutral-400'
+                        ? 'border-white/40 bg-white/8 animate-pulse' 
+                        : ''
                     }`}>
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-2.5 h-2.5 bg-blue-500 rounded-full"></div>
-                        <h3 className="text-base font-semibold text-black">Summary</h3>
+                        <div className="w-3 h-3 bg-gradient-to-r from-white/90 to-white/60 rounded-full shadow-lg"></div>
+                                                  <h3 className="text-sm font-semibold text-white font-mono-enhanced">Summary</h3>
                       </div>
-                      <div className="flex items-center gap-1">
-                        {/* Always show expand for summary since it's truncated content */}
-                        <button
-                          onClick={() => toggleBoxExpansion('summary')}
-                          className="p-2 rounded-lg hover:bg-neutral-100 transition-colors duration-200"
-                        >
-                          <svg 
-                            className={`w-4 h-4 text-neutral-500 transition-transform duration-300 ${
-                              expandedBoxes.has('summary') ? 'rotate-180' : ''
-                            }`} 
-                            fill="none" 
-                            stroke="currentColor" 
-                            viewBox="0 0 24 24"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
+                      <div className="flex items-center gap-2">
                         <button
                           onClick={() => generateAudioForSection('summary')}
                           disabled={isGeneratingAudio}
-                          className={`play-button relative p-2.5 rounded-lg transition-all duration-300 transform active:scale-95 hover:scale-105 ${
+                          className={`btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce ${
                             currentPlayingSection === 'summary'
-                              ? 'bg-neutral-300 text-black'
-                              : 'bg-neutral-100 text-black hover:bg-neutral-200 active:bg-neutral-300'
-                          } disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}
-                          onMouseDown={(e) => {
-                            e.currentTarget.classList.add('play-button-clicked');
-                            setTimeout(() => {
-                              e.currentTarget.classList.remove('play-button-clicked');
-                            }, 400);
-                          }}
+                              ? 'bg-white/20 text-white animate-pulse'
+                              : ''
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
                           {isGeneratingAudio && currentPlayingSection === 'summary' ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current"></div>
                           ) : (
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                               <path d="M8 5v14l11-7z" />
@@ -1141,16 +1811,9 @@ export default function ReadPage() {
                         </button>
                       </div>
                     </div>
-                    <div className={`flex-1 overflow-hidden transition-all duration-300 ${
-                      expandedBoxes.has('summary') ? 'overflow-visible' : ''
-                    }`}>
-                      <p className={`text-sm text-neutral-600 leading-relaxed ${
-                        expandedBoxes.has('summary') ? '' : 'line-clamp-7'
-                      }`}>
-                        {expandedBoxes.has('summary') 
-                          ? (scrapedData.cleanText || scrapedData.text)
-                          : extractSummary(scrapedData.text, 180)
-                        }
+                    <div className="flex-1 overflow-hidden">
+                      <p className="text-base text-white/80 leading-[1.5] font-mono-enhanced line-clamp-3">
+                        {extractSummary(scrapedData.text, 120)}
                       </p>
                     </div>
                   </div>
@@ -1168,25 +1831,27 @@ export default function ReadPage() {
           </div>
 
           {/* Currently Playing Info & Controls - Separate section below */}
-          <div className="mt-8 xl:mt-12">
+          <div className="mt-12 xl:mt-16">
             <div className="max-w-2xl">
               {/* Currently Playing Card */}
               {currentPlayingSection && audioUrl && (
-                <div className="bg-neutral-50 border border-neutral-200 text-black rounded-2xl p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="text-sm font-medium">Now Playing</span>
+                <div className="glass-card rounded-2xl p-8 neon-glow animate-float-gentle">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-4 h-4 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
+                    <span className="text-sm font-medium font-mono-enhanced text-gradient">Now Playing</span>
                   </div>
-                  <h3 className="text-lg font-semibold mb-2">
+                  <h3 className="text-2xl font-semibold mb-4 text-white font-mono-enhanced">
                     {currentPlayingSection === 'summary' ? 'Summary' :
                      currentPlayingSection?.startsWith('section-') ? 
                        scrapedData.sections[parseInt(currentPlayingSection.replace('section-', ''))]?.title || 'Section' : 
                        currentPlayingSection}
                   </h3>
                   {currentWordIndex !== -1 && wordsData[currentWordIndex] && (
-                    <p className="text-sm text-neutral-600">
-                      Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} of {wordsData.filter(word => !word.isWhitespace).length}
-                    </p>
+                    <div className="glass-card px-4 py-2 rounded-lg inline-block">
+                      <p className="text-sm text-white/70 font-mono-enhanced">
+                        Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} of {wordsData.filter(word => !word.isWhitespace).length}
+                      </p>
+                    </div>
                   )}
                 </div>
               )}
@@ -1197,19 +1862,19 @@ export default function ReadPage() {
 
       {/* Bottom Audio Control Bar */}
       {audioUrl && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-t border-border/40">
+        <div className="fixed bottom-0 left-0 right-0 z-50 glass-card border-t border-white/10 backdrop-blur-xl">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="max-w-4xl mx-auto">
               <div className="flex flex-col gap-3">
                 {/* Progress Bar */}
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground min-w-[3rem] text-right">
+                <div className="flex items-center gap-4">
+                  <span className="text-xs text-white/70 min-w-[3rem] text-right font-mono-enhanced">
                     {formatTime(currentTime)}
                   </span>
                   <div className="flex-1 relative">
-                    <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
+                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-primary transition-all duration-200"
+                        className="h-full bg-gradient-to-r from-white/90 to-white/60 transition-all duration-300 shadow-lg"
                         style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
                       />
                     </div>
@@ -1223,31 +1888,31 @@ export default function ReadPage() {
                       aria-label="Audio progress"
                     />
                   </div>
-                  <span className="text-xs text-muted-foreground min-w-[3rem]">
+                  <span className="text-xs text-white/70 min-w-[3rem] font-mono-enhanced">
                     {formatTime(duration)}
                   </span>
                 </div>
 
                 {/* Control Buttons */}
                 <div className="flex items-center justify-between">
-                  {/* Left Side - Play/Pause/Stop */}
-                  <div className="flex items-center gap-2">
+                  {/* Left Side - Play/Pause/Stop/Maximize */}
+                  <div className="flex items-center gap-3">
                     <button
                       onClick={handlePlayPause}
-                      disabled={!audioUrl}
-                      className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
-                        isPlaying
-                          ? 'bg-red-500 text-white hover:bg-red-600'
-                          : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                      disabled={!audioUrl && listeningQueue.length === 0}
+                      className={`flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 hover:scale-110 neon-glow ${
+                        isPlaying || isQueuePlaying
+                          ? 'bg-red-500/20 text-red-400 border border-red-400/30'
+                          : 'btn-premium'
                       } disabled:opacity-50 disabled:cursor-not-allowed`}
-                      aria-label={isPlaying ? 'Pause' : 'Play'}
+                      aria-label={isPlaying || isQueuePlaying ? 'Pause' : 'Play'}
                     >
-                      {isPlaying ? (
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      {isPlaying || isQueuePlaying ? (
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6" />
                         </svg>
                       ) : (
-                        <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
                           <path d="M8 5v14l11-7z" />
                         </svg>
                       )}
@@ -1255,23 +1920,47 @@ export default function ReadPage() {
                     
                     <button
                       onClick={handleStop}
-                      disabled={!audioUrl}
-                      className="flex items-center justify-center w-8 h-8 rounded-full bg-secondary text-secondary-foreground hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={!audioUrl && !isQueuePlaying}
+                      className="flex items-center justify-center w-10 h-10 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed"
                       aria-label="Stop"
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-5 h-5 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 10h6v4H9z" />
                       </svg>
                     </button>
+
+                    {/* Maximize Button - Only show when queue is playing and not maximized */}
+                    {isQueuePlaying && !isMaximized && (
+                      <button
+                        onClick={() => setIsMaximized(true)}
+                        className="flex items-center justify-center w-10 h-10 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 neon-glow"
+                        aria-label="Maximize Player"
+                      >
+                        <svg className="w-5 h-5 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
 
                   {/* Center - Current Section and Word Indicator */}
-                  <div className="flex flex-col items-center gap-1 text-sm text-muted-foreground">
-                    {currentPlayingSection && (
-                      <span className="flex items-center gap-1">
-                        <div className="w-2 h-2 bg-primary rounded-full"></div>
-                        <span className="font-medium text-xs">
+                  <div className="flex flex-col items-center gap-2 text-sm text-white/70">
+                    {/* Queue Status */}
+                    {isQueuePlaying && listeningQueue.length > 0 && currentQueueIndex !== -1 && (
+                      <span className="flex items-center gap-2 glass-card px-3 py-1 rounded-lg">
+                        <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
+                        <span className="font-medium text-xs font-mono-enhanced">
+                          Queue: {currentQueueIndex + 1} / {listeningQueue.length} - {listeningQueue[currentQueueIndex]?.title}
+                        </span>
+                      </span>
+                    )}
+                    
+                    {/* Individual Section Status */}
+                    {currentPlayingSection && !isQueuePlaying && (
+                      <span className="flex items-center gap-2 glass-card px-3 py-1 rounded-lg">
+                        <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
+                        <span className="font-medium text-xs font-mono-enhanced">
                           Playing: {
                             currentPlayingSection === 'summary' ? 'Summary' :
                             currentPlayingSection?.startsWith('section-') ? 
@@ -1281,28 +1970,40 @@ export default function ReadPage() {
                         </span>
                       </span>
                     )}
+                    
+                    {/* Word Progress */}
                     {currentWordIndex !== -1 && wordsData[currentWordIndex] && (
-                      <span className="flex items-center gap-1">
-                        <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
-                        <span className="font-medium text-xs">
+                      <span className="flex items-center gap-2 glass-card px-3 py-1 rounded-lg">
+                        <div className="w-2 h-2 bg-white/80 rounded-full animate-pulse"></div>
+                        <span className="font-medium text-xs font-mono-enhanced">
                           Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} / {wordsData.filter(word => !word.isWhitespace).length}
+                        </span>
+                      </span>
+                    )}
+
+                    {/* Queue Available Indicator */}
+                    {!isQueuePlaying && !currentPlayingSection && listeningQueue.length > 0 && (
+                      <span className="flex items-center gap-2 glass-card px-3 py-1 rounded-lg">
+                        <div className="w-2 h-2 bg-blue-400/90 rounded-full animate-pulse"></div>
+                        <span className="font-medium text-xs font-mono-enhanced">
+                          {listeningQueue.length} items ready to play
                         </span>
                       </span>
                     )}
                   </div>
 
                   {/* Right Side - Speed Control */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground hidden sm:block">Speed:</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-white/50 hidden sm:block font-mono-enhanced">Speed:</span>
                     <div className="flex items-center gap-1">
                       {speedOptions.map((speed) => (
                         <button
                           key={speed}
                           onClick={() => handleSpeedChange(speed)}
-                          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-all duration-300 hover:scale-105 font-mono-enhanced ${
                             playbackRate === speed
-                              ? 'bg-primary text-primary-foreground'
-                              : 'bg-secondary text-secondary-foreground hover:bg-accent'
+                              ? 'btn-premium'
+                              : 'glass-card text-white/70 hover:bg-white/10'
                           }`}
                           aria-label={`Set speed to ${speed}x`}
                         >
@@ -1322,6 +2023,9 @@ export default function ReadPage() {
         <DragOverlay>
           {draggedItem ? <DragOverlayCard item={draggedItem} /> : null}
         </DragOverlay>
+
+        {/* Maximized Player Overlay */}
+        <MaximizedPlayer />
       </div>
     </DndContext>
   );
