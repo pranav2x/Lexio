@@ -171,25 +171,7 @@ html {
   transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Drag and Drop Optimizations */
-[data-rbd-draggable-context-id],
-[data-rbd-droppable-context-id],
-.draggable-item {
-  transform: translate3d(0, 0, 0);
-  will-change: transform;
-  backface-visibility: hidden;
-  perspective: 1000px;
-}
-
-/* Smooth drag transitions */
-.drag-smooth {
-  transition: transform 150ms cubic-bezier(0.2, 0, 0, 1);
-  will-change: transform;
-}
-
-.drag-smooth:hover {
-  transition: transform 100ms cubic-bezier(0.2, 0, 0, 1);
-}
+/* Removed drag and drop styles - no longer needed */
 
 /* Hardware acceleration for better performance */
 .gpu-accelerated {
@@ -354,16 +336,7 @@ html {
   transform: translateY(-1px);
 }
 
-/* Drag overlay enhanced */
-.drag-overlay-enhanced {
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(20px);
-  border: 2px dashed rgba(255, 255, 255, 0.4);
-  box-shadow: 
-    0 20px 60px rgba(255, 255, 255, 0.2),
-    0 0 100px rgba(255, 255, 255, 0.1) inset;
-  animation: float-dramatic 2s ease-in-out infinite;
-}
+/* Drag overlay styles removed - no longer needed */
 
 /* Progress bar enhanced */
 .progress-enhanced {
@@ -423,14 +396,7 @@ html {
   transition: all 0.4s cubic-bezier(0.23, 1, 0.320, 1);
 }
 
-.queue-zone-enhanced.drag-over {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 
-    0 30px 80px rgba(255, 255, 255, 0.15),
-    0 0 0 1px rgba(255, 255, 255, 0.1) inset;
-  transform: scale(1.02);
-}
+/* Drag-over styles removed - no longer needed */
 
 /* Micro-interactions */
 .micro-bounce:hover {

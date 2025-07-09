@@ -5,19 +5,6 @@ import { useRouter } from "next/navigation";
 import { useLexioState, useLexioActions } from "@/lib/store";
 import { extractSummary } from "@/lib/firecrawl";
 import { generateSpeech, cleanupAudioUrl, estimateTextDuration, clearTTSCache, getTTSCacheStats } from "@/lib/tts";
-import { 
-  DndContext, 
-  DragEndEvent, 
-  DragStartEvent,
-  DragOverlay,
-  useDraggable, 
-  useDroppable,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  closestCenter,
-  rectIntersection
-} from "@dnd-kit/core";
 
 interface WordData {
   word: string;
@@ -44,61 +31,39 @@ export default function ReadPage() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [currentWordIndex, setCurrentWordIndex] = useState(-1);
+  const [currentPlayingSection, setCurrentPlayingSection] = useState<PlayingSection>(null);
+  const [currentPlayingText, setCurrentPlayingText] = useState('');
   const [wordsData, setWordsData] = useState<WordData[]>([]);
   const [playbackRate, setPlaybackRate] = useState(1);
   
-  // Section-specific playback state
-  const [currentPlayingSection, setCurrentPlayingSection] = useState<PlayingSection>(null);
-  const [currentPlayingText, setCurrentPlayingText] = useState<string>('');
+  // Development cache state
+  const [cacheStats, setCacheStats] = useState<any>(null);
   
-
-  
-  // Listening Queue state
-  const [listeningQueue, setListeningQueue] = useState<QueueItem[]>([]);
-  const [isQueuePlaying, setIsQueuePlaying] = useState(false);
-  const [currentQueueIndex, setCurrentQueueIndex] = useState(-1);
-  
-  // Track which cards are moved to queue (to hide from original position)
-  const [movedToQueue, setMovedToQueue] = useState<Set<string>>(new Set());
-  
-  // Maximized player state with smooth transitions
+  // Maximized player state
   const [isMaximized, setIsMaximized] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isPreloading, setIsPreloading] = useState(false);
   
-  // Development cache state
-  const [cacheStats, setCacheStats] = useState<{ count: number; size: string; enabled: boolean } | null>(null);
+  // Queue state
+  const [listeningQueue, setListeningQueue] = useState<QueueItem[]>([]);
+  const [currentQueueIndex, setCurrentQueueIndex] = useState(-1);
+  const [isQueuePlaying, setIsQueuePlaying] = useState(false);
   
-  // Drag and drop state
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [draggedItem, setDraggedItem] = useState<{ id: string; title: string; content: string } | null>(null);
-  
-  // Playback control state (demo purposes)
+  // Queue controls state
   const [controlsPlaying, setControlsPlaying] = useState(false);
   const [controlsProgress, setControlsProgress] = useState(0);
+  const [controlsCurrentTime, setControlsCurrentTime] = useState(0);
   const [controlsShuffle, setControlsShuffle] = useState(false);
   const [controlsRepeat, setControlsRepeat] = useState(false);
-  const [controlsCurrentTime, setControlsCurrentTime] = useState(0);
-  const [controlsTotalTime] = useState(180); // 3 minutes demo duration
   
+  // Refs
   const audioRef = useRef<HTMLAudioElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const highlightedWordRef = useRef<HTMLSpanElement>(null);
-
-  // Drag sensors for smooth performance with stricter activation
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 12, // Require 12px of movement before drag starts (more deliberate)
-        delay: 100, // Small delay to prevent accidental drags
-        tolerance: 8, // Allow some tolerance for small movements
-      },
-    })
-  );
 
   // Sync control progress with actual audio playback (debounced)
   useEffect(() => {
@@ -129,29 +94,16 @@ export default function ReadPage() {
       if (prev.find(qItem => qItem.id === item.id)) return prev;
       return [...prev, item];
     });
-    
-    // Mark as moved to queue (hide from original position)
-    setMovedToQueue(prev => new Set([...prev, item.id]));
   };
 
   const removeFromQueue = (id: string) => {
     setListeningQueue(prev => prev.filter(item => item.id !== id));
-    
-    // Restore to original position (show in original position)
-    setMovedToQueue(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(id);
-      return newSet;
-    });
   };
 
   const clearQueue = () => {
     setListeningQueue([]);
     setIsQueuePlaying(false);
     setCurrentQueueIndex(-1);
-    
-    // Restore all cards to original positions
-    setMovedToQueue(new Set());
   };
 
   // Enhanced queue control functions with smooth state management
@@ -293,71 +245,27 @@ export default function ReadPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Drag and drop handlers
-  const handleDragStart = (event: DragStartEvent) => {
-    const { active } = event;
-    const draggedId = active.id.toString();
+  // Add to queue functions for buttons
+  const handleAddSectionToQueue = (sectionIndex: number) => {
+    if (!scrapedData?.sections[sectionIndex]) return;
     
-    setActiveId(draggedId);
-    
-    if (!scrapedData) return;
-    
-    if (draggedId === 'summary') {
-      setDraggedItem({
-        id: 'summary',
-        title: 'Summary',
-        content: extractSummary(scrapedData.cleanText || scrapedData.text, 1000)
-      });
-    } else if (draggedId.startsWith('section-')) {
-      const sectionIndex = parseInt(draggedId.replace('section-', ''));
-      const section = scrapedData.sections[sectionIndex];
-      if (section) {
-        setDraggedItem({
-          id: draggedId,
-          title: section.title,
-          content: section.content
-        });
-      }
-    }
+    const section = scrapedData.sections[sectionIndex];
+    addToQueue({
+      id: `section-${sectionIndex}`,
+      title: section.title,
+      content: section.content
+    });
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
+  const handleAddSummaryToQueue = () => {
+    if (!scrapedData) return;
     
-    // Always clear the drag state first
-    setActiveId(null);
-    setDraggedItem(null);
-    
-    // Only proceed if we have both active item and valid drop target
-    if (!over || !scrapedData) {
-      return;
-    }
-    
-    // Strictly check that the drop target is exactly the listening queue
-    if (over.id !== 'listening-queue') {
-      return;
-    }
-
-    const draggedId = active.id.toString();
-    
-    if (draggedId === 'summary') {
-      const summaryContent = extractSummary(scrapedData.cleanText || scrapedData.text, 1000);
-      addToQueue({
-        id: 'summary',
-        title: 'Summary',
-        content: summaryContent
-      });
-    } else if (draggedId.startsWith('section-')) {
-      const sectionIndex = parseInt(draggedId.replace('section-', ''));
-      const section = scrapedData.sections[sectionIndex];
-      if (section) {
-        addToQueue({
-          id: draggedId,
-          title: section.title,
-          content: section.content
-        });
-      }
-    }
+    const summaryContent = extractSummary(scrapedData.cleanText || scrapedData.text, 1000);
+    addToQueue({
+      id: 'summary',
+      title: 'Summary',
+      content: summaryContent
+    });
   };
 
   // Ultra-smooth queue playback with reliable loading completion
@@ -525,544 +433,6 @@ export default function ReadPage() {
       setControlsPlaying(false);
     }
   }, [isQueuePlaying, currentQueueIndex, listeningQueue, audioUrl, controlsRepeat, cleanupAudioUrl, generateSpeech]);
-
-  // Optimized Draggable Card Component
-  const DraggableCard = React.memo(({ id, children }: { id: string; children: React.ReactNode }) => {
-    const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-      id,
-    });
-
-    const isActive = activeId === id;
-
-    const style: React.CSSProperties = {
-      transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-      opacity: isDragging ? 0 : 1, // Make original completely invisible when dragging
-      willChange: 'transform',
-      zIndex: isDragging ? 1000 : 'auto',
-    };
-
-    return (
-      <div
-        ref={setNodeRef}
-        style={style}
-        {...listeners}
-        {...attributes}
-        className={`
-          draggable-item gpu-accelerated
-          transition-all duration-200 ease-out
-          ${isDragging 
-            ? 'cursor-grabbing' 
-            : 'cursor-grab hover:scale-[1.01] hover:shadow-lg drag-smooth'
-          }
-        `}
-      >
-        {children}
-      </div>
-    );
-  });
-  DraggableCard.displayName = 'DraggableCard';
-
-  // Drag Overlay Component for smooth dragging
-  const DragOverlayCard = ({ item }: { item: { id: string; title: string; content: string } }) => {
-    return (
-      <div className="w-full drag-overlay-enhanced rounded-xl p-6 h-48 flex flex-col shadow-2xl gpu-accelerated">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className={`w-3 h-3 rounded-full flex-shrink-0 shadow-lg ${
-              item.id === 'summary' ? 'bg-gradient-to-r from-white/90 to-white/60' : 'bg-gradient-to-r from-white/80 to-white/50'
-            }`}></div>
-            <h3 className="text-sm font-semibold text-white truncate font-mono-enhanced">
-              {item.title}
-            </h3>
-          </div>
-          <div className="p-2 glass-card rounded-lg neon-glow">
-            <svg className="w-4 h-4 text-white/90" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </div>
-        </div>
-        <div className="flex-1 overflow-hidden">
-          <p className="text-base text-white/80 leading-[1.5] line-clamp-3 font-mono-enhanced">
-            {item.content.length > 150 ? item.content.substring(0, 150) + '...' : item.content}
-          </p>
-        </div>
-      </div>
-    );
-  };
-
-  // Optimized Droppable Queue Zone
-  const ListeningQueueDropZone = React.memo(() => {
-    const { setNodeRef, isOver } = useDroppable({
-      id: 'listening-queue',
-    });
-
-    const isDragActive = activeId !== null;
-
-    return (
-      <div
-        ref={setNodeRef}
-        className={`
-          w-full min-h-[600px] lg:min-h-[700px] xl:min-h-[737px] queue-zone-enhanced rounded-xl p-6 
-          gpu-accelerated flex flex-col
-          ${isOver 
-            ? 'drag-over scale-105' 
-            : isDragActive
-              ? 'scale-102 border-white/30'
-              : ''
-          }
-        `}
-        style={{ willChange: 'transform, background-color, border-color' }}
-      >
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-headline text-gradient font-mono-enhanced">🎧 Listening Queue</h3>
-          {listeningQueue.length > 0 && (
-            <button
-              onClick={clearQueue}
-              className="text-sm text-white/50 hover:text-red-400 transition-all duration-300 btn-premium px-3 py-1 rounded font-mono-enhanced"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-
-        {listeningQueue.length === 0 ? (
-          <div className={`flex flex-col items-center justify-center flex-1 text-sm transition-all duration-500 ${
-            isOver ? 'text-white scale-110' : 'text-white/60'
-          }`}>
-            <div className="text-5xl mb-6">📥</div>
-            <div className="text-lg font-semibold mb-3 text-center font-mono-enhanced text-gradient">Drag sections here to queue them</div>
-            <div className="text-sm text-white/50 text-center px-6 font-mono-enhanced leading-relaxed">Build your custom listening experience by dragging any section from the left</div>
-            {isOver && (
-              <div className="text-base mt-6 text-white font-bold animate-pulse font-mono-enhanced neon-glow">
-                ✨ Drop to add to queue ✨
-              </div>
-            )}
-          </div>
-        ) : (
-          <>
-            {/* Currently Playing Item - Compact */}
-            {currentQueueIndex !== -1 && isQueuePlaying && listeningQueue[currentQueueIndex] && (
-              <div className="mb-6 glass-card rounded-xl p-4 neon-glow animate-float-gentle border-2 border-white/30">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="w-3 h-3 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
-                  <span className="text-sm font-semibold font-mono-enhanced text-gradient">Now Playing</span>
-                </div>
-                <h3 className="text-lg font-bold text-white mb-4 font-mono-enhanced truncate">
-                  {listeningQueue[currentQueueIndex].title}
-                </h3>
-                
-                {/* Word-by-word highlighting display */}
-                <div className="glass-card p-3 rounded-lg mb-4 max-h-32 overflow-y-auto">
-                  <div className="text-sm leading-relaxed font-mono-enhanced">
-                    {wordsData.length > 0 ? (
-                      wordsData.map((wordData, index) => (
-                        <span
-                          key={index}
-                          ref={currentWordIndex === index ? highlightedWordRef : null}
-                          className={`word-highlight inline-block ${
-                            wordData.isWhitespace 
-                              ? '' 
-                              : currentWordIndex === index && isPlaying
-                                ? 'active'
-                                : currentWordIndex > index
-                                  ? 'text-white/60'
-                                  : 'text-white/80 hover:text-white/90'
-                          } ${!wordData.isWhitespace ? 'cursor-pointer px-0.5 py-0.5 rounded' : ''}`}
-                          onClick={() => !wordData.isWhitespace && handleWordClick(index)}
-                        >
-                          {wordData.word}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-white/80">
-                        {listeningQueue[currentQueueIndex].content.substring(0, 100)}...
-                      </span>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Progress for current item */}
-                <div className="mb-4">
-                  <div className="flex items-center justify-between text-white/70 text-xs mb-2 font-mono-enhanced">
-                    <span>{formatTime(currentTime)}</span>
-                    <span>{formatTime(duration)}</span>
-                  </div>
-                  <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-gradient-to-r from-white/90 to-white/60 rounded-full transition-all duration-300"
-                      style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Queue List */}
-            <div className="flex-1 space-y-3 mb-8 overflow-y-auto">
-              <h4 className="text-lg font-semibold text-white/70 mb-4 font-mono-enhanced">Queue ({listeningQueue.length} items)</h4>
-              {listeningQueue.map((item, index) => (
-                <div
-                  key={item.id}
-                  className={`glass-card p-4 rounded-xl text-sm transition-all duration-300 flex items-start justify-between micro-bounce ${
-                    currentQueueIndex === index && isQueuePlaying
-                      ? 'bg-white/10 text-white border border-white/40 neon-glow scale-105'
-                      : 'text-white/80 hover:bg-white/5'
-                  }`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs text-white/50 font-mono-enhanced">#{index + 1}</span>
-                      {currentQueueIndex === index && isQueuePlaying && (
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
-                          <span className="text-xs text-white/90 font-medium font-mono-enhanced">Playing</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="font-semibold text-sm truncate mb-2 font-mono-enhanced">{item.title}</div>
-                    <div className="text-sm text-white/60 leading-relaxed font-mono-enhanced">
-                      {item.content.slice(0, 80)}...
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => removeFromQueue(item.id)}
-                    className="ml-4 btn-premium p-2 rounded-lg transition-all duration-300 flex-shrink-0 hover:scale-110 micro-bounce text-white/60 hover:text-red-400"
-                    disabled={currentQueueIndex === index && isQueuePlaying}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-
-
-          </>
-        )}
-
-        {/* Playback Control Bar */}
-        <div className="mt-6 glass-card rounded-xl p-4 neon-glow">
-          {/* Progress Bar */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between text-white/70 text-xs mb-2 font-mono-enhanced">
-              <span>{formatControlsTime(controlsCurrentTime)}</span>
-              <span>{formatControlsTime(duration || 0)}</span>
-            </div>
-            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden progress-enhanced relative cursor-pointer"
-                 onClick={(e) => {
-                   if (audioRef.current && duration > 0) {
-                     const rect = e.currentTarget.getBoundingClientRect();
-                     const clickX = e.clientX - rect.left;
-                     const percentage = clickX / rect.width;
-                     const seekTime = percentage * duration;
-                     audioRef.current.currentTime = seekTime;
-                   }
-                 }}>
-              <div 
-                className="h-full bg-gradient-to-r from-white/90 to-white/60 rounded-full transition-all duration-300 shadow-lg"
-                style={{ width: `${controlsProgress}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Control Buttons */}
-          <div className="flex items-center justify-center gap-4">
-            {/* Shuffle */}
-            <button
-              onClick={handleControlsShuffle}
-              disabled={listeningQueue.length === 0}
-              className={`p-2 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
-                controlsShuffle ? 'bg-white/20 text-white neon-glow' : 'text-white/60 hover:bg-white/10 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h6l4 4-4 4H4m16-8v8a4 4 0 01-8 0V8a4 4 0 018 0zM4 20h6l4-4-4-4H4" />
-              </svg>
-            </button>
-
-            {/* Previous */}
-            <button
-              onClick={handleControlsPrevious}
-              disabled={!isQueuePlaying || currentQueueIndex <= 0}
-              className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
-              </svg>
-            </button>
-
-            {/* Play/Pause */}
-            <button
-              onClick={handleControlsPlayPause}
-              disabled={listeningQueue.length === 0 && !audioUrl}
-              className="p-3 btn-premium rounded-full transition-all duration-300 hover:scale-110 neon-glow shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-            >
-              {controlsPlaying || isPlaying ? (
-                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                </svg>
-              ) : (
-                <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              )}
-            </button>
-
-            {/* Next */}
-            <button
-              onClick={handleControlsNext}
-              disabled={!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1}
-              className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
-              </svg>
-            </button>
-
-            {/* Repeat */}
-            <button
-              onClick={handleControlsRepeat}
-              disabled={listeningQueue.length === 0}
-              className={`p-2 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
-                controlsRepeat ? 'bg-white/20 text-white neon-glow' : 'text-white/60 hover:bg-white/10 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  });
-  ListeningQueueDropZone.displayName = 'ListeningQueueDropZone';
-
-  // Maximized Player Component
-  const MaximizedPlayer = () => {
-    // Show maximized player when queue is active
-    if (!isMaximized || currentQueueIndex === -1 || !listeningQueue[currentQueueIndex]) {
-      return null;
-    }
-
-    const currentItem = listeningQueue[currentQueueIndex];
-    
-    console.log(`🖥️ MaximizedPlayer: Rendering - preloading: ${isPreloading}, item: ${currentItem.title}`);
-
-    const handleClose = () => {
-      // Simple close without complex animations to prevent flashing
-      setIsMaximized(false);
-      setIsTransitioning(false);
-      setIsPreloading(false);
-    };
-
-    // Static loading state - no animations to prevent flashing
-    if (isPreloading) {
-      return (
-        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-6"></div>
-            <div className="text-white text-2xl font-mono-enhanced mb-2">
-              Preparing Audio Experience
-            </div>
-            <div className="text-white/70 text-sm font-mono-enhanced">
-              {currentItem.title}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center p-8 gpu-accelerated">
-        {/* Close/Minimize Button */}
-        <button
-          onClick={handleClose}
-          className="absolute top-8 right-8 z-10 w-14 h-14 rounded-full glass-card hover:bg-white/20 transition-all duration-300 hover:scale-110 neon-glow"
-        >
-          <svg className="w-7 h-7 text-white mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-
-        {/* Maximized Content */}
-        <div className="w-full max-w-5xl mx-auto">
-          {/* Header */}
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center gap-4 mb-4">
-              <div className="w-4 h-4 bg-red-500 rounded-full animate-pulse shadow-lg neon-glow"></div>
-              <span className="text-lg font-semibold font-mono-enhanced text-gradient">Now Playing</span>
-            </div>
-            <h1 className="text-4xl font-bold text-white mb-4 font-mono-enhanced leading-tight max-w-4xl mx-auto truncate">
-              {currentItem.title}
-            </h1>
-            <div className="flex items-center justify-center gap-6 text-sm text-white/70">
-              <span className="glass-card px-3 py-2 rounded-lg font-mono-enhanced neon-glow">
-                Track {currentQueueIndex + 1} of {listeningQueue.length}
-              </span>
-              <span className="glass-card px-3 py-2 rounded-lg font-mono-enhanced neon-glow">
-                {Math.ceil(currentItem.content.split(' ').length / 200)} min read
-              </span>
-              <span className="glass-card px-3 py-2 rounded-lg font-mono-enhanced neon-glow">
-                {wordsData.length > 0 && currentWordIndex !== -1 
-                  ? `${Math.round((currentWordIndex / wordsData.length) * 100)}% complete`
-                  : 'Loading...'
-                }
-              </span>
-            </div>
-          </div>
-
-          {/* Word-by-word Text Display */}
-          <div className="glass-card rounded-2xl p-6 mb-8 max-h-[45vh] overflow-y-auto neon-glow stable-ui" ref={contentRef}>
-            <div className="text-xl leading-[1.6] font-mono-enhanced text-center">
-              {wordsData.length > 0 ? (
-                wordsData.map((wordData, index) => (
-                  <span
-                    key={index}
-                    ref={currentWordIndex === index ? highlightedWordRef : null}
-                    className={`word-highlight inline-block mx-0.5 ${
-                      wordData.isWhitespace 
-                        ? '' 
-                        : currentWordIndex === index && isPlaying
-                          ? 'active'
-                          : currentWordIndex > index
-                            ? 'text-white/40'
-                            : 'text-white/80 hover:text-white/90'
-                    } ${!wordData.isWhitespace ? 'cursor-pointer px-1 py-0.5 rounded' : ''}`}
-                    onClick={() => !wordData.isWhitespace && handleWordClick(index)}
-                  >
-                    {wordData.word}
-                  </span>
-                ))
-              ) : (
-                <span className="text-white/80">
-                  {currentItem.content.substring(0, 200)}...
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Enhanced Control Center */}
-          <div className="glass-card rounded-2xl p-6 neon-glow">
-            {/* Progress Section */}
-            <div className="mb-6">
-              <div className="flex items-center justify-between text-white/70 text-sm mb-3 font-mono-enhanced">
-                <span className="glass-card px-3 py-1.5 rounded-lg">{formatTime(currentTime)}</span>
-                <span className="text-white font-semibold text-base">
-                  {wordsData.length > 0 && currentWordIndex !== -1 
-                    ? `Word ${wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} / ${wordsData.filter(word => !word.isWhitespace).length}`
-                    : 'Audio Loading...'
-                  }
-                </span>
-                <span className="glass-card px-3 py-1.5 rounded-lg">{formatTime(duration)}</span>
-              </div>
-              
-              <div className="relative w-full h-2 bg-white/10 rounded-full overflow-hidden cursor-pointer group"
-                   onClick={(e) => {
-                     if (audioRef.current && duration > 0) {
-                       const rect = e.currentTarget.getBoundingClientRect();
-                       const clickX = e.clientX - rect.left;
-                       const percentage = clickX / rect.width;
-                       const seekTime = percentage * duration;
-                       audioRef.current.currentTime = seekTime;
-                     }
-                   }}>
-                <div 
-                  className="h-full bg-gradient-to-r from-white via-white/90 to-white/80 rounded-full transition-all duration-300 shadow-lg"
-                  style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                />
-                <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-all duration-200 rounded-full"></div>
-              </div>
-            </div>
-
-            {/* Enhanced Control Buttons */}
-            <div className="flex items-center justify-center gap-6">
-              {/* Shuffle */}
-              <button
-                onClick={handleControlsShuffle}
-                disabled={listeningQueue.length === 0}
-                className={`w-10 h-10 rounded-full transition-all duration-300 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed ${
-                  controlsShuffle ? 'bg-white/20 text-white neon-glow' : 'glass-card text-white/70 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <svg className="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h6l4 4-4 4H4m16-8v8a4 4 0 01-8 0V8a4 4 0 018 0zM4 20h6l4-4-4-4H4" />
-                </svg>
-              </button>
-
-              {/* Previous */}
-              <button
-                onClick={handleControlsPrevious}
-                disabled={!isQueuePlaying || currentQueueIndex <= 0}
-                className="w-12 h-12 rounded-full glass-card hover:bg-white/20 transition-all duration-300 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <svg className="w-6 h-6 text-white mx-auto" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
-                </svg>
-              </button>
-
-              {/* Play/Pause - Center Button */}
-              <button
-                onClick={handleControlsPlayPause}
-                disabled={listeningQueue.length === 0 && !audioUrl}
-                className="w-16 h-16 rounded-full btn-premium transition-all duration-300 hover:scale-105 neon-glow shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-              >
-                {isPlaying ? (
-                  <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                  </svg>
-                ) : (
-                  <svg className="w-8 h-8 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                )}
-              </button>
-
-              {/* Next */}
-              <button
-                onClick={handleControlsNext}
-                disabled={!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1}
-                className="w-12 h-12 rounded-full glass-card hover:bg-white/20 transition-all duration-300 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <svg className="w-6 h-6 text-white mx-auto" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
-                </svg>
-              </button>
-
-              {/* Repeat */}
-              <button
-                onClick={handleControlsRepeat}
-                disabled={listeningQueue.length === 0}
-                className={`w-10 h-10 rounded-full transition-all duration-300 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed ${
-                  controlsRepeat ? 'bg-white/20 text-white neon-glow' : 'glass-card text-white/70 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <svg className="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Additional Info */}
-            <div className="mt-4 flex items-center justify-center gap-4 text-white/60">
-              <span className="glass-card px-3 py-1.5 rounded-lg text-xs font-mono-enhanced">
-                Speed: {playbackRate}x
-              </span>
-              {controlsShuffle && (
-                <span className="glass-card px-3 py-1.5 rounded-lg text-xs font-mono-enhanced text-blue-400">
-                  🔀 Shuffled
-                </span>
-              )}
-              {controlsRepeat && (
-                <span className="glass-card px-3 py-1.5 rounded-lg text-xs font-mono-enhanced text-green-400">
-                  🔁 Repeat On
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   // Handle audio end for queue progression
   useEffect(() => {
@@ -1272,11 +642,6 @@ export default function ReadPage() {
       setIsGeneratingAudio(false);
     }
   }, [scrapedData]);
-
-  // Legacy function for backward compatibility
-  const generateAudioFromText = useCallback(async () => {
-    await generateAudioForSection('summary');
-  }, [generateAudioForSection]);
 
   // Ultra-responsive word index updates with zero delay
   useEffect(() => {
@@ -1506,22 +871,16 @@ export default function ReadPage() {
     );
   }
 
-      return (
-    <DndContext 
-      sensors={sensors}
-      collisionDetection={rectIntersection}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-    >
-      <div className="min-h-screen text-white">
-        <style jsx>{`
-          .line-clamp-3 {
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-          }
-        `}</style>
+  return (
+    <div className="min-h-screen text-white">
+      <style jsx>{`
+        .line-clamp-3 {
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+      `}</style>
       {/* Hidden Audio Element */}
       {audioUrl && (
         <audio
@@ -1658,39 +1017,39 @@ export default function ReadPage() {
               )}
 
               {/* Content Stats */}
-                              <div className="flex flex-wrap gap-8 text-sm text-white/70 mb-8">
-                  <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
-                    <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <span className="font-mono-enhanced">{scrapedData.text.split(' ').length.toLocaleString()} words</span>
-                    {scrapedData.cleanText && scrapedData.cleanText !== scrapedData.text && (
-                      <span className="text-white/60 text-xs font-mono-enhanced">
-                        ({scrapedData.cleanText.split(' ').length.toLocaleString()} optimized)
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
-                    <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className="font-mono-enhanced">~{Math.ceil(scrapedData.text.split(' ').length / 200)} min read</span>
-                  </div>
-                  <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
-                    <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                    </svg>
-                    <span className="font-mono-enhanced">~{Math.ceil(estimateTextDuration(scrapedData.text) / 60)} min listen</span>
-                  </div>
-                  {audioUrl && (
-                    <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg neon-glow animate-pulse">
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12 7-12 6z" />
-                      </svg>
-                      <span className="font-mono-enhanced text-white">Audio ready</span>
-                    </div>
+                          <div className="flex flex-wrap gap-8 text-sm text-white/70 mb-8">
+                <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
+                  <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span className="font-mono-enhanced">{scrapedData.text.split(' ').length.toLocaleString()} words</span>
+                  {scrapedData.cleanText && scrapedData.cleanText !== scrapedData.text && (
+                    <span className="text-white/60 text-xs font-mono-enhanced">
+                      ({scrapedData.cleanText.split(' ').length.toLocaleString()} optimized)
+                    </span>
                   )}
                 </div>
+                <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
+                  <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="font-mono-enhanced">~{Math.ceil(scrapedData.text.split(' ').length / 200)} min read</span>
+                </div>
+                <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
+                  <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  </svg>
+                  <span className="font-mono-enhanced">~{Math.ceil(estimateTextDuration(scrapedData.text) / 60)} min listen</span>
+                </div>
+                {audioUrl && (
+                  <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg neon-glow animate-pulse">
+                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12 7-12 6z" />
+                    </svg>
+                    <span className="font-mono-enhanced text-white">Audio ready</span>
+                  </div>
+                )}
+              </div>
 
             </div>
           </div>
@@ -1705,58 +1064,46 @@ export default function ReadPage() {
                 
                 {/* Section Cards */}
                 {scrapedData.sections.slice(0, 5).map((section, index) => (
-                  !movedToQueue.has(`section-${index}`) && (
-                    <DraggableCard key={index} id={`section-${index}`}>
-                    <div 
-                      className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
-                        currentPlayingSection === `section-${index}` 
-                          ? 'border-white/40 bg-white/8 animate-pulse' 
-                          : ''
-                      }`}
-                    >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <div className={`w-3 h-3 rounded-full flex-shrink-0 shadow-lg ${
-                          index % 3 === 0 ? 'bg-gradient-to-r from-white/90 to-white/60' : 
-                          index % 3 === 1 ? 'bg-gradient-to-r from-white/80 to-white/50' : 'bg-gradient-to-r from-white/85 to-white/55'
-                        }`}></div>
-                        <h3 className="text-sm font-semibold text-white truncate font-mono-enhanced">
-                          {section.title}
-                        </h3>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <button
-                          onClick={() => generateAudioForSection(`section-${index}` as PlayingSection)}
-                          disabled={isGeneratingAudio}
-                          className={`btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce ${
-                            currentPlayingSection === `section-${index}`
-                              ? 'bg-white/20 text-white animate-pulse'
-                              : ''
-                          } disabled:opacity-50 disabled:cursor-not-allowed`}
-                        >
-                          {isGeneratingAudio && currentPlayingSection === `section-${index}` ? (
-                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current"></div>
-                          ) : (
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M8 5v14l11-7z" />
-                            </svg>
-                          )}
-                        </button>
-                      </div>
+                  <div 
+                    key={index}
+                    className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
+                      currentPlayingSection === `section-${index}` 
+                        ? 'border-white/40 bg-white/8 animate-pulse' 
+                        : ''
+                    }`}
+                  >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className={`w-3 h-3 rounded-full flex-shrink-0 shadow-lg ${
+                        index % 3 === 0 ? 'bg-gradient-to-r from-white/90 to-white/60' : 
+                        index % 3 === 1 ? 'bg-gradient-to-r from-white/80 to-white/50' : 'bg-gradient-to-r from-white/85 to-white/55'
+                      }`}></div>
+                      <h3 className="text-sm font-semibold text-white truncate font-mono-enhanced">
+                        {section.title}
+                      </h3>
                     </div>
-                    <div className="flex-1 overflow-hidden">
-                      <p className="text-base text-white/80 leading-[1.5] font-mono-enhanced line-clamp-3">
-                        {section.content.length > 150 ? section.content.substring(0, 150) + '...' : section.content}
-                      </p>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                                                                    <button
+                        onClick={() => handleAddSectionToQueue(index)}
+                        className="btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce hover:bg-white/20 active:bg-white/30"
+                      >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                          </svg>
+                        </button>
                     </div>
                   </div>
-                  </DraggableCard>
-                  )
+                  <div className="flex-1 overflow-hidden">
+                    <p className="text-base text-white/80 leading-[1.5] font-mono-enhanced line-clamp-3">
+                      {section.content.length > 150 ? section.content.substring(0, 150) + '...' : section.content}
+                    </p>
+                  </div>
+                </div>
                 ))}
 
 
 
-                                 
+                               
 
                 {/* Additional Sections (if more than 5) */}
                 {scrapedData.sections.length > 5 && (
@@ -1774,9 +1121,9 @@ export default function ReadPage() {
                 )}
 
                 {/* Summary Card - Moved to bottom */}
-                {scrapedData.text && !movedToQueue.has('summary') && (
-                  <DraggableCard id="summary">
-                                        <div className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
+                {scrapedData.text && (
+                  <div 
+                    className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
                       currentPlayingSection === 'summary' 
                         ? 'border-white/40 bg-white/8 animate-pulse' 
                         : ''
@@ -1788,21 +1135,12 @@ export default function ReadPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => generateAudioForSection('summary')}
-                          disabled={isGeneratingAudio}
-                          className={`btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce ${
-                            currentPlayingSection === 'summary'
-                              ? 'bg-white/20 text-white animate-pulse'
-                              : ''
-                          } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          onClick={handleAddSummaryToQueue}
+                          className="btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce hover:bg-white/20 active:bg-white/30"
                         >
-                          {isGeneratingAudio && currentPlayingSection === 'summary' ? (
-                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current"></div>
-                          ) : (
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M8 5v14l11-7z" />
-                            </svg>
-                          )}
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                          </svg>
                         </button>
                       </div>
                     </div>
@@ -1812,7 +1150,6 @@ export default function ReadPage() {
                       </p>
                     </div>
                   </div>
-                  </DraggableCard>
                 )}
               </div>
             </div>
@@ -1820,7 +1157,220 @@ export default function ReadPage() {
             {/* Listening Queue - Takes up 4/12 columns */}
             <div className="xl:col-span-4">
               <div className="xl:sticky xl:top-24">
-                <ListeningQueueDropZone />
+                <div className="w-full min-h-[600px] lg:min-h-[700px] xl:min-h-[737px] queue-zone-enhanced rounded-xl p-6 gpu-accelerated flex flex-col">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-headline text-gradient font-mono-enhanced">🎧 Listening Queue</h3>
+                    {listeningQueue.length > 0 && (
+                      <button
+                        onClick={clearQueue}
+                        className="text-sm text-white/50 hover:text-red-400 transition-all duration-300 btn-premium px-3 py-1 rounded font-mono-enhanced"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {listeningQueue.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center flex-1 text-sm transition-all duration-500 text-white/60">
+                      <div className="text-5xl mb-6">📥</div>
+                      <div className="text-lg font-semibold mb-3 text-center font-mono-enhanced text-gradient">Your Listening Queue</div>
+                      <div className="text-sm text-white/50 text-center px-6 font-mono-enhanced leading-relaxed">Use the + buttons on content cards to add them to your queue</div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Currently Playing Item - Compact */}
+                      {currentQueueIndex !== -1 && isQueuePlaying && listeningQueue[currentQueueIndex] && (
+                        <div className="mb-6 glass-card rounded-xl p-4 neon-glow animate-float-gentle border-2 border-white/30">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="w-3 h-3 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
+                            <span className="text-sm font-semibold font-mono-enhanced text-gradient">Now Playing</span>
+                          </div>
+                          <h3 className="text-lg font-bold text-white mb-4 font-mono-enhanced truncate">
+                            {listeningQueue[currentQueueIndex].title}
+                          </h3>
+                          
+                          {/* Word-by-word highlighting display */}
+                          <div className="glass-card p-3 rounded-lg mb-4 max-h-32 overflow-y-auto">
+                            <div className="text-sm leading-relaxed font-mono-enhanced">
+                              {wordsData.length > 0 ? (
+                                wordsData.map((wordData, index) => (
+                                  <span
+                                    key={index}
+                                    ref={currentWordIndex === index ? highlightedWordRef : null}
+                                    className={`word-highlight inline-block ${
+                                      wordData.isWhitespace 
+                                        ? '' 
+                                        : currentWordIndex === index && isPlaying
+                                          ? 'active'
+                                          : currentWordIndex > index
+                                            ? 'text-white/60'
+                                            : 'text-white/80 hover:text-white/90'
+                                    } ${!wordData.isWhitespace ? 'cursor-pointer px-0.5 py-0.5 rounded' : ''}`}
+                                    onClick={() => !wordData.isWhitespace && handleWordClick(index)}
+                                  >
+                                    {wordData.word}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-white/80">
+                                  {listeningQueue[currentQueueIndex].content.substring(0, 100)}...
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Progress for current item */}
+                          <div className="mb-4">
+                            <div className="flex items-center justify-between text-white/70 text-xs mb-2 font-mono-enhanced">
+                              <span>{formatTime(currentTime)}</span>
+                              <span>{formatTime(duration)}</span>
+                            </div>
+                            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-gradient-to-r from-white/90 to-white/60 rounded-full transition-all duration-300"
+                                style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Queue List */}
+                      <div className="flex-1 space-y-3 mb-8 overflow-y-auto">
+                        <h4 className="text-lg font-semibold text-white/70 mb-4 font-mono-enhanced">Queue ({listeningQueue.length} items)</h4>
+                        {listeningQueue.map((item, index) => (
+                          <div
+                            key={item.id}
+                            className={`glass-card p-4 rounded-xl text-sm transition-all duration-300 flex items-start justify-between micro-bounce ${
+                              currentQueueIndex === index && isQueuePlaying
+                                ? 'bg-white/10 text-white border border-white/40 neon-glow scale-105'
+                                : 'text-white/80 hover:bg-white/5'
+                            }`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-xs text-white/50 font-mono-enhanced">#{index + 1}</span>
+                                {currentQueueIndex === index && isQueuePlaying && (
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
+                                    <span className="text-xs text-white/90 font-medium font-mono-enhanced">Playing</span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="font-semibold text-sm truncate mb-2 font-mono-enhanced">{item.title}</div>
+                              <div className="text-sm text-white/60 leading-relaxed font-mono-enhanced">
+                                {item.content.slice(0, 80)}...
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => removeFromQueue(item.id)}
+                              className="ml-4 btn-premium p-2 rounded-lg transition-all duration-300 flex-shrink-0 hover:scale-110 micro-bounce text-white/60 hover:text-red-400"
+                              disabled={currentQueueIndex === index && isQueuePlaying}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+
+                    </>
+                  )}
+
+                  {/* Playback Control Bar */}
+                  <div className="mt-6 glass-card rounded-xl p-4 neon-glow">
+                    {/* Progress Bar */}
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between text-white/70 text-xs mb-2 font-mono-enhanced">
+                        <span>{formatControlsTime(controlsCurrentTime)}</span>
+                        <span>{formatControlsTime(duration || 0)}</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden progress-enhanced relative cursor-pointer"
+                           onClick={(e) => {
+                             if (audioRef.current && duration > 0) {
+                               const rect = e.currentTarget.getBoundingClientRect();
+                               const clickX = e.clientX - rect.left;
+                               const percentage = clickX / rect.width;
+                               const seekTime = percentage * duration;
+                               audioRef.current.currentTime = seekTime;
+                             }
+                           }}>
+                        <div 
+                          className="h-full bg-gradient-to-r from-white/90 to-white/60 rounded-full transition-all duration-300 shadow-lg"
+                          style={{ width: `${controlsProgress}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Control Buttons */}
+                    <div className="flex items-center justify-center gap-4">
+                      {/* Shuffle */}
+                      <button
+                        onClick={handleControlsShuffle}
+                        disabled={listeningQueue.length === 0}
+                        className={`p-2 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
+                          controlsShuffle ? 'bg-white/20 text-white neon-glow' : 'text-white/60 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h6l4 4-4 4H4m16-8v8a4 4 0 01-8 0V8a4 4 0 018 0zM4 20h6l4-4-4-4H4" />
+                        </svg>
+                      </button>
+
+                      {/* Previous */}
+                      <button
+                        onClick={handleControlsPrevious}
+                        disabled={!isQueuePlaying || currentQueueIndex <= 0}
+                        className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
+                        </svg>
+                      </button>
+
+                      {/* Play/Pause */}
+                      <button
+                        onClick={handleControlsPlayPause}
+                        disabled={listeningQueue.length === 0 && !audioUrl}
+                        className="p-3 btn-premium rounded-full transition-all duration-300 hover:scale-110 neon-glow shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                      >
+                        {controlsPlaying || isPlaying ? (
+                          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        )}
+                      </button>
+
+                      {/* Next */}
+                      <button
+                        onClick={handleControlsNext}
+                        disabled={!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1}
+                        className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
+                        </svg>
+                      </button>
+
+                      {/* Repeat */}
+                      <button
+                        onClick={handleControlsRepeat}
+                        disabled={listeningQueue.length === 0}
+                        className={`p-2 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
+                          controlsRepeat ? 'bg-white/20 text-white neon-glow' : 'text-white/60 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2014,14 +1564,6 @@ export default function ReadPage() {
         </div>
       )}
 
-        {/* Drag Overlay for smooth dragging */}
-        <DragOverlay>
-          {draggedItem ? <DragOverlayCard item={draggedItem} /> : null}
-        </DragOverlay>
-
-        {/* Maximized Player Overlay */}
-        <MaximizedPlayer />
-      </div>
-    </DndContext>
+    </div>
   );
 } 
