@@ -629,7 +629,7 @@ export default function ReadPage() {
           <div className={`flex flex-col items-center justify-center flex-1 text-sm transition-all duration-500 ${
             isOver ? 'text-white scale-110' : 'text-white/60'
           }`}>
-            <div className="text-5xl mb-6 animate-float-gentle">📥</div>
+            <div className="text-5xl mb-6">📥</div>
             <div className="text-lg font-semibold mb-3 text-center font-mono-enhanced text-gradient">Drag sections here to queue them</div>
             <div className="text-sm text-white/50 text-center px-6 font-mono-enhanced leading-relaxed">Build your custom listening experience by dragging any section from the left</div>
             {isOver && (
@@ -1635,7 +1635,7 @@ export default function ReadPage() {
         <div className="max-w-[1800px] mx-auto px-8 lg:px-12 py-12">
           
           {/* Article Header - Full Width */}
-          <div className="mb-16 animate-float-gentle">
+          <div className="mb-16">
             <div className="max-w-5xl">
               <h1 className="text-display text-gradient mb-8 leading-tight">
                 {scrapedData.title}
@@ -1830,7 +1830,7 @@ export default function ReadPage() {
             <div className="max-w-2xl">
               {/* Currently Playing Card */}
               {currentPlayingSection && audioUrl && (
-                <div className="glass-card rounded-xl p-4 neon-glow animate-float-gentle">
+                <div className="glass-card rounded-xl p-4 neon-glow">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-3 h-3 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
                     <span className="text-xs font-medium font-mono-enhanced text-gradient">Now Playing</span>
@@ -1856,7 +1856,7 @@ export default function ReadPage() {
       </main>
 
       {/* Bottom Audio Control Bar */}
-      {audioUrl && (
+      {(audioUrl || listeningQueue.length > 0) && !isMaximized && (
         <div className="fixed bottom-0 left-0 right-0 z-50 glass-card border-t border-white/10 backdrop-blur-xl">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="max-w-4xl mx-auto">
@@ -1896,13 +1896,13 @@ export default function ReadPage() {
                       onClick={handlePlayPause}
                       disabled={!audioUrl && listeningQueue.length === 0}
                       className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-300 hover:scale-110 neon-glow ${
-                        isPlaying || isQueuePlaying
+                        (isQueuePlaying ? controlsPlaying : isPlaying)
                           ? 'bg-red-500/20 text-red-400 border border-red-400/30'
                           : 'btn-premium'
                       } disabled:opacity-50 disabled:cursor-not-allowed`}
-                      aria-label={isPlaying || isQueuePlaying ? 'Pause' : 'Play'}
+                      aria-label={(isQueuePlaying ? controlsPlaying : isPlaying) ? 'Pause' : 'Play'}
                     >
-                      {isPlaying || isQueuePlaying ? (
+                      {(isQueuePlaying ? controlsPlaying : isPlaying) ? (
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6" />
                         </svg>
