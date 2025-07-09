@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { scrapeWebsite, isValidUrl } from "@/lib/firecrawl";
 import { useLexioActions, useLexioState } from "@/lib/store";
@@ -85,31 +85,52 @@ Religious and cultural exchange marked the era, with Islam spreading through tra
 export default function App() {
   const [url, setUrl] = useState("");
   const [developerMode, setDeveloperMode] = useState(false);
+  const [autoLaunched, setAutoLaunched] = useState(false);
   const router = useRouter();
   const { setScrapedData, setLoading, setError, setCurrentUrl } = useLexioActions();
   const { isLoading, error } = useLexioState();
+
+  // Auto-enable developer mode and launch in development
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development' && !autoLaunched && !isLoading) {
+      console.log('🚀 Development mode: Auto-launching lexio with sample content...');
+      setDeveloperMode(true);
+      setAutoLaunched(true);
+      
+      // Auto-launch after a brief delay to ensure state is set
+      setTimeout(() => {
+        handleDeveloperModeConversion();
+      }, 300);
+    }
+  }, [autoLaunched, isLoading]);
+
+  const handleDeveloperModeConversion = () => {
+    console.log('📄 Loading sample content for development...');
+    setLoading(true);
+    setError(null);
+    setCurrentUrl(DEVELOPER_MODE_DATA.url);
+    
+    // Fast loading for development (minimal delay)
+    setTimeout(() => {
+      setScrapedData({
+        title: DEVELOPER_MODE_DATA.title,
+        text: DEVELOPER_MODE_DATA.text,
+        cleanText: DEVELOPER_MODE_DATA.cleanText,
+        html: `<article><h1>${DEVELOPER_MODE_DATA.title}</h1><p>${DEVELOPER_MODE_DATA.text}</p></article>`,
+        sections: DEVELOPER_MODE_DATA.sections
+      });
+      setLoading(false);
+      console.log('✅ Sample content loaded, navigating to /read...');
+      router.push("/read");
+    }, 200);
+  };
 
   const handleLexio = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Developer mode - use hardcoded data
     if (developerMode) {
-      setLoading(true);
-      setError(null);
-      setCurrentUrl(DEVELOPER_MODE_DATA.url);
-      
-      // Simulate loading delay for realism
-      setTimeout(() => {
-        setScrapedData({
-          title: DEVELOPER_MODE_DATA.title,
-          text: DEVELOPER_MODE_DATA.text,
-          cleanText: DEVELOPER_MODE_DATA.cleanText,
-          html: `<article><h1>${DEVELOPER_MODE_DATA.title}</h1><p>${DEVELOPER_MODE_DATA.text}</p></article>`,
-          sections: DEVELOPER_MODE_DATA.sections
-        });
-        setLoading(false);
-        router.push("/read");
-      }, 1000);
+      handleDeveloperModeConversion();
       return;
     }
 
@@ -254,7 +275,14 @@ export default function App() {
           
           {developerMode && (
             <div className="text-center">
-              <p className="text-sm text-neutral-500">developer mode enabled - using sample content</p>
+              <p className="text-sm text-neutral-500">
+                developer mode enabled - using sample content
+                {process.env.NODE_ENV === 'development' && autoLaunched && (
+                  <span className="block text-xs text-green-600 mt-1">
+                    🚀 auto-launched for development
+                  </span>
+                )}
+              </p>
             </div>
           )}
 

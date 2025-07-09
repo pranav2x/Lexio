@@ -139,9 +139,10 @@ function setCachedAudio(cacheKey: string, audioBlob: Blob, textHash: string, voi
         }
         
         localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
-        console.log(`🎵 TTS: Cached audio for development (${keys.length}/${DEV_CACHE_MAX_SIZE})`);
+        console.log(`🎵 TTS: Cached audio for development (${Object.keys(cache).length}/${DEV_CACHE_MAX_SIZE})`);
+        console.log(`💾 TTS: Cache key "${cacheKey}" stored successfully`);
       } catch (error) {
-        console.debug('Error caching TTS audio:', error);
+        console.error('❌ Error caching TTS audio:', error);
       }
     };
     reader.readAsDataURL(audioBlob);
@@ -190,9 +191,6 @@ export async function generateSpeech(
     const cacheKey = generateCacheKey(text, config);
     const cachedAudio = getCachedAudio(cacheKey);
     
-    console.log(`🔍 TTS Debug: Checking cache for key: ${cacheKey}`);
-    console.log(`📝 TTS Debug: Text length: ${text.length}, First 100 chars: "${text.substring(0, 100)}..."`);
-    
     if (cachedAudio) {
       try {
         const audioBlob = dataURLToBlob(cachedAudio.audioData);
@@ -209,8 +207,6 @@ export async function generateSpeech(
       } catch (error) {
         console.debug('Error loading cached audio, falling back to API:', error);
       }
-    } else {
-      console.log('❌ TTS Debug: No cache found, will use API');
     }
   }
 
@@ -296,6 +292,50 @@ export function clearTTSCache(): boolean {
 }
 
 /**
+ * Debug function to inspect cache contents (development only)
+ */
+export function inspectTTSCache(): void {
+  if (!isDevelopment || typeof window === 'undefined') {
+    console.log('❌ Cache inspection only available in development');
+    return;
+  }
+  
+  try {
+    const cacheData = localStorage.getItem(DEV_CACHE_KEY);
+    console.log('🔍 TTS Cache Inspection:');
+    console.log('📦 Cache Key:', DEV_CACHE_KEY);
+    console.log('📊 Raw Data Exists:', !!cacheData);
+    
+    if (cacheData) {
+      const cache = JSON.parse(cacheData);
+      const keys = Object.keys(cache);
+      console.log('📝 Number of cached items:', keys.length);
+      console.log('🔑 Cache keys:', keys);
+      
+      keys.forEach((key, index) => {
+        const item = cache[key];
+        const age = Date.now() - item.timestamp;
+        const ageMinutes = Math.round(age / (1000 * 60));
+        console.log(`   ${index + 1}. Key: ${key}, Age: ${ageMinutes} minutes`);
+      });
+      
+      const sizeKB = (new Blob([cacheData]).size / 1024).toFixed(1);
+      console.log('💾 Total cache size:', `${sizeKB} KB`);
+    } else {
+      console.log('📝 No cached data found');
+    }
+  } catch (error) {
+    console.error('❌ Error inspecting cache:', error);
+  }
+}
+
+// Make cache inspection available globally in development
+if (isDevelopment && typeof window !== 'undefined') {
+  (window as any).inspectTTSCache = inspectTTSCache;
+  console.log('🔧 Dev Tool Available: Type "inspectTTSCache()" in console to inspect TTS cache');
+}
+
+/**
  * Get TTS cache statistics (development only)
  */
 export function getTTSCacheStats(): { count: number; size: string; enabled: boolean } | null {
@@ -305,6 +345,7 @@ export function getTTSCacheStats(): { count: number; size: string; enabled: bool
   
   try {
     const cacheData = localStorage.getItem(DEV_CACHE_KEY);
+    
     if (!cacheData) {
       return { count: 0, size: '0 KB', enabled: true };
     }
