@@ -40,7 +40,8 @@ const DEFAULT_TTS_OPTIONS: Required<TTSOptions> = {
  */
 const DEV_CACHE_KEY = 'narrate-dev-tts-cache';
 const DEV_CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-const DEV_CACHE_MAX_SIZE = 50; // Maximum number of cached items
+const DEV_CACHE_MAX_SIZE = 15; // Reduced from 50 to prevent quota issues
+const DEV_CACHE_MAX_STORAGE_MB = 3; // Maximum storage size in MB
 
 /**
  * Check if we're in development mode
@@ -73,6 +74,59 @@ function generateCacheKey(text: string, options: Required<TTSOptions>): string {
     useSpeakerBoost: options.useSpeakerBoost,
   }));
   return `${textHash}-${settingsHash}`;
+}
+
+/**
+ * Check storage size and clear old items if needed
+ */
+function cleanupCacheIfNeeded(): boolean {
+  if (!isDevelopment || typeof window === 'undefined') return false;
+  
+  try {
+    const cacheData = localStorage.getItem(DEV_CACHE_KEY);
+    if (!cacheData) return true;
+    
+    const cache = JSON.parse(cacheData);
+    const keys = Object.keys(cache);
+    
+    // Check storage size
+    const sizeBytes = new Blob([cacheData]).size;
+    const sizeMB = sizeBytes / (1024 * 1024);
+    
+    // If we're over the size limit, aggressively clean up
+    if (sizeMB > DEV_CACHE_MAX_STORAGE_MB || keys.length > DEV_CACHE_MAX_SIZE) {
+      console.log(`🧹 TTS: Cache cleanup needed (${sizeMB.toFixed(1)}MB, ${keys.length} items)`);
+      
+      // Sort by timestamp and keep only the most recent items
+      const sortedKeys = keys.sort((a, b) => cache[b].timestamp - cache[a].timestamp);
+      const keepCount = Math.min(DEV_CACHE_MAX_SIZE, Math.floor(DEV_CACHE_MAX_SIZE * 0.7)); // Keep 70% of max
+      const keysToKeep = sortedKeys.slice(0, keepCount);
+      
+      const cleanedCache: any = {};
+      keysToKeep.forEach(key => {
+        cleanedCache[key] = cache[key];
+      });
+      
+      localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cleanedCache));
+      
+      const newSizeBytes = new Blob([JSON.stringify(cleanedCache)]).size;
+      const newSizeMB = newSizeBytes / (1024 * 1024);
+      console.log(`✅ TTS: Cache cleaned (${newSizeMB.toFixed(1)}MB, ${keysToKeep.length} items)`);
+      
+      return true;
+    }
+    
+    return true;
+  } catch (error) {
+    console.warn('⚠️ TTS: Error during cache cleanup, clearing entire cache:', error);
+    try {
+      localStorage.removeItem(DEV_CACHE_KEY);
+      return true;
+    } catch (clearError) {
+      console.error('❌ TTS: Failed to clear cache:', clearError);
+      return false;
+    }
+  }
 }
 
 /**
@@ -112,6 +166,12 @@ function setCachedAudio(cacheKey: string, audioBlob: Blob, textHash: string, voi
   if (!isDevelopment || typeof window === 'undefined') return;
   
   try {
+    // Check and cleanup cache before adding new item
+    if (!cleanupCacheIfNeeded()) {
+      console.warn('⚠️ TTS: Cache cleanup failed, skipping cache storage');
+      return;
+    }
+    
     // Convert blob to base64 for storage
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -122,27 +182,84 @@ function setCachedAudio(cacheKey: string, audioBlob: Blob, textHash: string, voi
         const cache = cacheData ? JSON.parse(cacheData) : {};
         
         // Add new item
-        cache[cacheKey] = {
+        const newItem = {
           audioData: base64Data,
           timestamp: Date.now(),
           textHash,
           voiceSettings,
         };
         
-        // Limit cache size
-        const keys = Object.keys(cache);
-        if (keys.length > DEV_CACHE_MAX_SIZE) {
-          // Remove oldest items
-          const sortedKeys = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
-          const toRemove = sortedKeys.slice(0, keys.length - DEV_CACHE_MAX_SIZE);
+        // Check if adding this item would exceed limits
+        const testCache = { ...cache, [cacheKey]: newItem };
+        const testSizeBytes = new Blob([JSON.stringify(testCache)]).size;
+        const testSizeMB = testSizeBytes / (1024 * 1024);
+        
+        // If adding this item would exceed our limits, do additional cleanup
+        if (testSizeMB > DEV_CACHE_MAX_STORAGE_MB || Object.keys(testCache).length > DEV_CACHE_MAX_SIZE) {
+          const keys = Object.keys(cache);
+          if (keys.length > 0) {
+            // Remove oldest items more aggressively
+            const sortedKeys = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
+            const keepCount = Math.max(1, Math.floor(DEV_CACHE_MAX_SIZE * 0.5)); // Keep only 50%
+            const toRemove = sortedKeys.slice(0, sortedKeys.length - keepCount);
+            toRemove.forEach(key => delete cache[key]);
+            console.log(`🧹 TTS: Aggressive cleanup removed ${toRemove.length} items`);
+          }
+        }
+        
+        // Add the new item
+        cache[cacheKey] = newItem;
+        
+        // Final limit check
+        const finalKeys = Object.keys(cache);
+        if (finalKeys.length > DEV_CACHE_MAX_SIZE) {
+          const sortedKeys = finalKeys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
+          const toRemove = sortedKeys.slice(0, finalKeys.length - DEV_CACHE_MAX_SIZE);
           toRemove.forEach(key => delete cache[key]);
         }
         
-        localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
-        console.log(`🎵 TTS: Cached audio for development (${Object.keys(cache).length}/${DEV_CACHE_MAX_SIZE})`);
-        console.log(`💾 TTS: Cache key "${cacheKey}" stored successfully`);
+        // Try to save with QuotaExceededError handling
+        try {
+          localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
+          
+          const finalSizeBytes = new Blob([JSON.stringify(cache)]).size;
+          const finalSizeMB = finalSizeBytes / (1024 * 1024);
+          console.log(`🎵 TTS: Cached audio (${Object.keys(cache).length}/${DEV_CACHE_MAX_SIZE} items, ${finalSizeMB.toFixed(1)}MB)`);
+          console.log(`💾 TTS: Cache key "${cacheKey}" stored successfully`);
+          
+        } catch (storageError: any) {
+          if (storageError.name === 'QuotaExceededError' || storageError.code === 22) {
+            console.warn('⚠️ TTS: Storage quota exceeded, clearing cache and retrying...');
+            
+            // Clear entire cache and try again with just this item
+            try {
+              localStorage.removeItem(DEV_CACHE_KEY);
+              const freshCache = { [cacheKey]: newItem };
+              localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(freshCache));
+              console.log('✅ TTS: Cache cleared and new item stored');
+            } catch (retryError) {
+              console.error('❌ TTS: Failed to store even after clearing cache:', retryError);
+              // Give up on caching for this item
+            }
+          } else {
+            throw storageError; // Re-throw other errors
+          }
+        }
+        
       } catch (error) {
         console.error('❌ Error caching TTS audio:', error);
+        
+        // If we hit a quota error, try to clear some space
+        if (error instanceof Error && 
+            (error.name === 'QuotaExceededError' || error.message.includes('quota'))) {
+          console.warn('⚠️ TTS: Quota exceeded, attempting emergency cleanup...');
+          try {
+            localStorage.removeItem(DEV_CACHE_KEY);
+            console.log('🧹 TTS: Emergency cache clear completed');
+          } catch (clearError) {
+            console.error('❌ TTS: Emergency cache clear failed:', clearError);
+          }
+        }
       }
     };
     reader.readAsDataURL(audioBlob);

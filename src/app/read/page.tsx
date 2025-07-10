@@ -39,6 +39,7 @@ export default function ReadPage() {
   const [currentPlayingText, setCurrentPlayingText] = useState('');
   const [wordsData, setWordsData] = useState<WordData[]>([]);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [hasSelectedSpeed, setHasSelectedSpeed] = useState(false);
   
   // Development cache state
   const [cacheStats, setCacheStats] = useState<any>(null);
@@ -85,25 +86,150 @@ export default function ReadPage() {
     return () => clearTimeout(timeoutId);
   }, [isQueuePlaying, currentTime, duration, isPlaying]);
 
+  // Monitor queue length and auto-clear "now playing" state when queue becomes empty
+  useEffect(() => {
+    if (listeningQueue.length === 0 && (isQueuePlaying || currentPlayingSection || audioUrl)) {
+      console.log('🧹 Queue empty: Auto-clearing now playing state');
+      
+      // Stop audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      
+      // Clean up audio URL
+      if (audioUrl) {
+        cleanupAudioUrl(audioUrl);
+        setAudioUrl(null);
+      }
+      
+      // Clear all queue and playing state
+      setIsQueuePlaying(false);
+      setCurrentQueueIndex(-1);
+      setCurrentPlayingSection(null);
+      setCurrentPlayingText('');
+      setCurrentWordIndex(-1);
+      setWordsData([]);
+      setIsPlaying(false);
+      setControlsPlaying(false);
+      setControlsProgress(0);
+      setControlsCurrentTime(0);
+      setIsMaximized(false);
+      setIsPreloading(false);
+    }
+  }, [listeningQueue.length, isQueuePlaying, currentPlayingSection, audioUrl]);
 
+
+
+  // Helper function to check if an item is in the queue
+  const isInQueue = (itemId: string) => {
+    return listeningQueue.some(item => item.id === itemId);
+  };
+
+  // Helper function to get available sections (not in queue)
+  const getAvailableSections = () => {
+    if (!scrapedData?.sections) return [];
+    return scrapedData.sections.filter((_, index) => !isInQueue(`section-${index}`));
+  };
+
+  // Helper function to check if summary is available (not in queue)
+  const isSummaryAvailable = () => {
+    return !isInQueue('summary');
+  };
 
   // Queue management functions
   const addToQueue = (item: QueueItem) => {
     setListeningQueue(prev => {
       // Prevent duplicates
       if (prev.find(qItem => qItem.id === item.id)) return prev;
+      console.log(`➕ Adding "${item.title}" to queue`);
       return [...prev, item];
     });
   };
 
   const removeFromQueue = (id: string) => {
-    setListeningQueue(prev => prev.filter(item => item.id !== id));
+    setListeningQueue(prev => {
+      const removedItem = prev.find(item => item.id === id);
+      const newQueue = prev.filter(item => item.id !== id);
+      
+      if (removedItem) {
+        console.log(`➖ Removing "${removedItem.title}" from queue`);
+      }
+      
+      // If we removed the currently playing item or queue becomes empty
+      if (newQueue.length === 0) {
+        // Queue is now empty - stop everything
+        stopQueuePlayback();
+      } else if (isQueuePlaying) {
+        // Check if we removed the currently playing item
+        const removedItemIndex = prev.findIndex(item => item.id === id);
+        if (removedItemIndex === currentQueueIndex) {
+          // We removed the currently playing item - stop current playback
+          if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+          }
+          if (audioUrl) {
+            cleanupAudioUrl(audioUrl);
+            setAudioUrl(null);
+          }
+          
+          // Update current index if needed
+          if (currentQueueIndex >= newQueue.length) {
+            setCurrentQueueIndex(newQueue.length - 1);
+          }
+          
+          // Clear playing state until user manually starts again
+          setCurrentPlayingSection(null);
+          setCurrentPlayingText('');
+          setCurrentWordIndex(-1);
+          setWordsData([]);
+          setIsPlaying(false);
+          setControlsPlaying(false);
+        } else if (removedItemIndex < currentQueueIndex) {
+          // We removed an item before the current one - adjust index
+          setCurrentQueueIndex(currentQueueIndex - 1);
+        }
+      }
+      
+      return newQueue;
+    });
+  };
+
+  const stopQueuePlayback = () => {
+    // Stop audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    
+    // Clean up audio URL
+    if (audioUrl) {
+      cleanupAudioUrl(audioUrl);
+      setAudioUrl(null);
+    }
+    
+    // Clear all queue and playing state
+    setIsQueuePlaying(false);
+    setCurrentQueueIndex(-1);
+    setCurrentPlayingSection(null);
+    setCurrentPlayingText('');
+    setCurrentWordIndex(-1);
+    setWordsData([]);
+    setIsPlaying(false);
+    setControlsPlaying(false);
+    setControlsProgress(0);
+    setControlsCurrentTime(0);
+    setIsMaximized(false);
+    setIsPreloading(false);
   };
 
   const clearQueue = () => {
+    // Stop all playback first
+    stopQueuePlayback();
+    
+    // Clear the queue
     setListeningQueue([]);
-    setIsQueuePlaying(false);
-    setCurrentQueueIndex(-1);
   };
 
   // Enhanced queue control functions with smooth state management
@@ -151,12 +277,26 @@ export default function ReadPage() {
   const handleControlsPrevious = async () => {
     if (!isQueuePlaying || currentQueueIndex <= 0) return;
     
-    // Go to previous item in queue
+    // Go to previous item in queue - generate word timings IMMEDIATELY
     const prevIndex = currentQueueIndex - 1;
-    setCurrentQueueIndex(prevIndex);
     const prevItem = listeningQueue[prevIndex];
+    const estimatedDuration = estimateTextDuration(prevItem.content);
+    const timings = generateWordTimings(prevItem.content, estimatedDuration);
+    
+    // Set all states together for immediate word display
+    setCurrentQueueIndex(prevIndex);
+    setCurrentPlayingText(prevItem.content);
+    setCurrentPlayingSection(prevItem.id as PlayingSection);
+    setCurrentWordIndex(-1);
+    setWordsData(timings); // Set word data immediately
     
     try {
+      // Properly stop current audio before switching
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      
       // Cleanup current audio
       if (audioUrl) {
         cleanupAudioUrl(audioUrl);
@@ -164,15 +304,17 @@ export default function ReadPage() {
       
       const result = await generateSpeech(prevItem.content);
       setAudioUrl(result.audioUrl);
-      setCurrentPlayingText(prevItem.content);
-      setCurrentPlayingSection(prevItem.id as PlayingSection);
-      setCurrentWordIndex(-1);
       
-      // Auto-play previous item
+      // Auto-play previous item with proper error handling
       if (audioRef.current) {
         audioRef.current.load();
-        audioRef.current.play();
-        setControlsPlaying(true);
+        try {
+          await audioRef.current.play();
+          setControlsPlaying(true);
+        } catch (playError) {
+          console.debug('Play interrupted, will start when user interacts:', playError);
+          setControlsPlaying(false);
+        }
       }
     } catch (error) {
       console.error('Error playing previous queue item:', error);
@@ -182,12 +324,26 @@ export default function ReadPage() {
   const handleControlsNext = async () => {
     if (!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1) return;
     
-    // Go to next item in queue (same as playNextInQueue but manual)
+    // Go to next item in queue - generate word timings IMMEDIATELY
     const nextIndex = currentQueueIndex + 1;
-    setCurrentQueueIndex(nextIndex);
     const nextItem = listeningQueue[nextIndex];
+    const estimatedDuration = estimateTextDuration(nextItem.content);
+    const timings = generateWordTimings(nextItem.content, estimatedDuration);
+    
+    // Set all states together for immediate word display
+    setCurrentQueueIndex(nextIndex);
+    setCurrentPlayingText(nextItem.content);
+    setCurrentPlayingSection(nextItem.id as PlayingSection);
+    setCurrentWordIndex(-1);
+    setWordsData(timings); // Set word data immediately
     
     try {
+      // Properly stop current audio before switching
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      
       // Cleanup current audio
       if (audioUrl) {
         cleanupAudioUrl(audioUrl);
@@ -195,15 +351,17 @@ export default function ReadPage() {
       
       const result = await generateSpeech(nextItem.content);
       setAudioUrl(result.audioUrl);
-      setCurrentPlayingText(nextItem.content);
-      setCurrentPlayingSection(nextItem.id as PlayingSection);
-      setCurrentWordIndex(-1);
       
-      // Auto-play next item
+      // Auto-play next item with proper error handling
       if (audioRef.current) {
         audioRef.current.load();
-        audioRef.current.play();
-        setControlsPlaying(true);
+        try {
+          await audioRef.current.play();
+          setControlsPlaying(true);
+        } catch (playError) {
+          console.debug('Play interrupted, will start when user interacts:', playError);
+          setControlsPlaying(false);
+        }
       }
     } catch (error) {
       console.error('Error playing next queue item:', error);
@@ -276,37 +434,37 @@ export default function ReadPage() {
     
     console.log('🚀 Queue: Starting playback for:', firstItem.title);
     
-    // Set initial states - preloading will stay true until everything is ready
+    // Generate word timings IMMEDIATELY before any other operations
+    console.log('⏱️ Queue: Generating word timings immediately...');
+    const estimatedDuration = estimateTextDuration(firstItem.content);
+    const timings = generateWordTimings(firstItem.content, estimatedDuration);
+    
+    // Set all states together to minimize re-renders and ensure words show immediately
     setIsPreloading(true);
     setIsQueuePlaying(true);
     setCurrentQueueIndex(0);
     setIsMaximized(true); // Set maximized immediately to prevent flashing
     setIsTransitioning(false);
+    setCurrentPlayingText(firstItem.content);
+    setCurrentPlayingSection(firstItem.id as PlayingSection);
+    setCurrentWordIndex(-1);
+    setWordsData(timings); // Set word data immediately
     
     try {
       console.log('📡 Queue: Generating audio...');
       
-      // Generate audio first
+      // Generate audio
       const result = await generateSpeech(firstItem.content);
       
       console.log('✅ Queue: Audio generated, setting up player...');
       
       // Set audio state
       setAudioUrl(result.audioUrl);
-      setCurrentPlayingText(firstItem.content);
-      setCurrentPlayingSection(firstItem.id as PlayingSection);
-      setCurrentWordIndex(-1);
       
       // Update cache stats after generating audio
       if (process.env.NODE_ENV === 'development') {
         setCacheStats(getTTSCacheStats());
       }
-      
-      // Generate word timings immediately with estimated duration
-      console.log('⏱️ Queue: Generating word timings...');
-      const estimatedDuration = estimateTextDuration(firstItem.content);
-      const timings = generateWordTimings(firstItem.content, estimatedDuration);
-      setWordsData(timings);
       
       // Set up audio element
       if (result.audioUrl && audioRef.current) {
@@ -374,30 +532,59 @@ export default function ReadPage() {
       // Repeat current item
       if (audioRef.current) {
         audioRef.current.currentTime = 0;
-        audioRef.current.play();
-        setControlsPlaying(true);
+        try {
+          await audioRef.current.play();
+          setControlsPlaying(true);
+        } catch (playError) {
+          console.debug('Play interrupted during repeat:', playError);
+          setControlsPlaying(false);
+        }
       }
       return;
     }
     
     const nextIndex = currentQueueIndex + 1;
     if (nextIndex >= listeningQueue.length) {
-      // Queue finished - stop everything
+      // Queue finished - stop everything completely
+      console.log('🏁 Queue finished: Clearing all state');
+      
+      // Stop and cleanup audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      if (audioUrl) {
+        cleanupAudioUrl(audioUrl);
+        setAudioUrl(null);
+      }
+      
+      // Clear all queue and playing state
       setIsQueuePlaying(false);
       setCurrentQueueIndex(-1);
       setCurrentPlayingSection(null);
       setCurrentPlayingText('');
       setCurrentWordIndex(-1);
-      setIsMaximized(false);
+      setWordsData([]);
+      setIsPlaying(false);
       setControlsPlaying(false);
       setControlsProgress(0);
       setControlsCurrentTime(0);
+      setIsMaximized(false);
+      setIsPreloading(false);
       return;
     }
     
-    // Move to next item
-    setCurrentQueueIndex(nextIndex);
+    // Move to next item - generate word timings IMMEDIATELY
     const nextItem = listeningQueue[nextIndex];
+    const estimatedDuration = estimateTextDuration(nextItem.content);
+    const timings = generateWordTimings(nextItem.content, estimatedDuration);
+    
+    // Set all states together for immediate word display
+    setCurrentQueueIndex(nextIndex);
+    setCurrentPlayingText(nextItem.content);
+    setCurrentPlayingSection(nextItem.id as PlayingSection);
+    setCurrentWordIndex(-1); // Reset word highlighting
+    setWordsData(timings); // Set word data immediately
     
     try {
       // Cleanup previous audio
@@ -407,9 +594,6 @@ export default function ReadPage() {
       
       const result = await generateSpeech(nextItem.content);
       setAudioUrl(result.audioUrl);
-      setCurrentPlayingText(nextItem.content);
-      setCurrentPlayingSection(nextItem.id as PlayingSection);
-      setCurrentWordIndex(-1); // Reset word highlighting
       
       // Update cache stats after generating audio
       if (process.env.NODE_ENV === 'development') {
@@ -420,11 +604,16 @@ export default function ReadPage() {
       setControlsCurrentTime(0);
       setControlsProgress(0);
       
-      // Auto-play next item
+      // Auto-play next item with proper error handling
       if (audioRef.current) {
         audioRef.current.load();
-        audioRef.current.play();
-        setControlsPlaying(true);
+        try {
+          await audioRef.current.play();
+          setControlsPlaying(true);
+        } catch (playError) {
+          console.debug('Play interrupted during queue progression:', playError);
+          setControlsPlaying(false);
+        }
       }
     } catch (error) {
       console.error('Error playing next queue item:', error);
@@ -779,7 +968,11 @@ export default function ReadPage() {
       if (isPlaying) {
         audioRef.current.pause();
       } else {
-        audioRef.current.play();
+        try {
+          audioRef.current.play();
+        } catch (playError) {
+          console.debug('Play interrupted in queue controls:', playError);
+        }
       }
       return;
     }
@@ -789,7 +982,11 @@ export default function ReadPage() {
     if (isPlaying) {
       audioRef.current.pause();
     } else {
-      audioRef.current.play();
+      try {
+        audioRef.current.play();
+      } catch (playError) {
+        console.debug('Play interrupted in individual controls:', playError);
+      }
     }
   };
 
@@ -839,6 +1036,7 @@ export default function ReadPage() {
     if (!audioRef.current) return;
     
     setPlaybackRate(newRate);
+    setHasSelectedSpeed(true); // Mark that user has selected a speed
     audioRef.current.playbackRate = newRate;
   };
 
@@ -1057,13 +1255,28 @@ export default function ReadPage() {
           {/* Main 3-Column Layout Grid */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 xl:gap-12 items-start">
             
-            {/* Content Cards Section - Takes up 8/12 columns */}
-            <div className="xl:col-span-8">
-              {/* Cards Grid - 2 columns of cards */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+            {/* Content Cards Section - Takes up 7/12 columns */}
+            <div className="xl:col-span-7">
+              {/* Check if all content is in queue */}
+              {getAvailableSections().length === 0 && !isSummaryAvailable() && scrapedData.sections.length <= 5 ? (
+                <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
+                  <div className="text-6xl mb-6">🎧</div>
+                  <h3 className="text-xl font-bold text-white mb-3 font-mono-enhanced">All Content in Queue!</h3>
+                  <p className="text-white/70 font-mono-enhanced">
+                    All sections are now in your listening queue. Remove items from the queue to see them here again.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Cards Grid - 2 columns of cards */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
                 
-                {/* Section Cards */}
-                {scrapedData.sections.slice(0, 5).map((section, index) => (
+                {/* Section Cards - Only show sections not in queue */}
+                {scrapedData.sections.slice(0, 5).map((section, index) => {
+                  // Don't render if this section is in the queue
+                  if (isInQueue(`section-${index}`)) return null;
+                  
+                  return (
                   <div 
                     key={index}
                     className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
@@ -1083,14 +1296,15 @@ export default function ReadPage() {
                       </h3>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                                                                    <button
+                      <button
                         onClick={() => handleAddSectionToQueue(index)}
                         className="btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce hover:bg-white/20 active:bg-white/30"
+                        title={`Add "${section.title}" to listening queue`}
                       >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                          </svg>
-                        </button>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                   <div className="flex-1 overflow-hidden">
@@ -1099,7 +1313,8 @@ export default function ReadPage() {
                     </p>
                   </div>
                 </div>
-                ))}
+                  );
+                })}
 
 
 
@@ -1120,8 +1335,8 @@ export default function ReadPage() {
                   </div>
                 )}
 
-                {/* Summary Card - Moved to bottom */}
-                {scrapedData.text && (
+                {/* Summary Card - Only show if not in queue */}
+                {scrapedData.text && isSummaryAvailable() && (
                   <div 
                     className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
                       currentPlayingSection === 'summary' 
@@ -1137,6 +1352,7 @@ export default function ReadPage() {
                         <button
                           onClick={handleAddSummaryToQueue}
                           className="btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce hover:bg-white/20 active:bg-white/30"
+                          title="Add summary to listening queue"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -1151,13 +1367,15 @@ export default function ReadPage() {
                     </div>
                   </div>
                 )}
-              </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Listening Queue - Takes up 4/12 columns */}
-            <div className="xl:col-span-4">
+            {/* Listening Queue - Takes up 5/12 columns */}
+            <div className="xl:col-span-5">
               <div className="xl:sticky xl:top-24">
-                <div className="w-full min-h-[600px] lg:min-h-[700px] xl:min-h-[737px] queue-zone-enhanced rounded-xl p-6 gpu-accelerated flex flex-col">
+                <div className="w-full min-h-[600px] lg:min-h-[700px] xl:min-h-[737px] queue-zone-enhanced rounded-xl p-4 gpu-accelerated flex flex-col overflow-hidden">
                   <div className="flex items-center justify-between mb-6">
                     <h3 className="text-headline text-gradient font-mono-enhanced">🎧 Listening Queue</h3>
                     {listeningQueue.length > 0 && (
@@ -1180,7 +1398,7 @@ export default function ReadPage() {
                     <>
                       {/* Currently Playing Item - Compact */}
                       {currentQueueIndex !== -1 && isQueuePlaying && listeningQueue[currentQueueIndex] && (
-                        <div className="mb-6 glass-card rounded-xl p-4 neon-glow animate-float-gentle border-2 border-white/30">
+                        <div className="mb-6 glass-card rounded-xl p-4 shadow-lg shadow-white/20 border-2 border-white/30">
                           <div className="flex items-center gap-2 mb-3">
                             <div className="w-3 h-3 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
                             <span className="text-sm font-semibold font-mono-enhanced text-gradient">Now Playing</span>
@@ -1212,9 +1430,17 @@ export default function ReadPage() {
                                   </span>
                                 ))
                               ) : (
-                                <span className="text-white/80">
-                                  {listeningQueue[currentQueueIndex].content.substring(0, 100)}...
-                                </span>
+                                // Show all text immediately while word timings are being prepared
+                                <div className="text-white/80">
+                                  {listeningQueue[currentQueueIndex].content.split(/(\s+)/).map((part, index) => (
+                                    <span
+                                      key={index}
+                                      className={part.trim() ? 'hover:text-white/90 cursor-pointer px-0.5 py-0.5 rounded' : ''}
+                                    >
+                                      {part}
+                                    </span>
+                                  ))}
+                                </div>
                               )}
                             </div>
                           </div>
@@ -1236,15 +1462,15 @@ export default function ReadPage() {
                       )}
 
                       {/* Queue List */}
-                      <div className="flex-1 space-y-3 mb-8 overflow-y-auto">
+                      <div className="flex-1 space-y-3 mb-8 overflow-y-auto overflow-x-hidden px-2 py-1">
                         <h4 className="text-lg font-semibold text-white/70 mb-4 font-mono-enhanced">Queue ({listeningQueue.length} items)</h4>
                         {listeningQueue.map((item, index) => (
                           <div
                             key={item.id}
-                            className={`glass-card p-4 rounded-xl text-sm transition-all duration-300 flex items-start justify-between micro-bounce ${
+                            className={`glass-card p-4 rounded-xl text-sm transition-all duration-300 flex items-start justify-between ${
                               currentQueueIndex === index && isQueuePlaying
-                                ? 'bg-white/10 text-white border border-white/40 neon-glow scale-105'
-                                : 'text-white/80 hover:bg-white/5'
+                                ? 'bg-white/10 text-white border border-white/40 shadow-lg shadow-white/10'
+                                : 'text-white/80 hover:bg-white/5 hover:border-white/20'
                             }`}
                           >
                             <div className="flex-1 min-w-0">
@@ -1264,10 +1490,13 @@ export default function ReadPage() {
                             </div>
                             <button
                               onClick={() => removeFromQueue(item.id)}
-                              className="ml-4 btn-premium p-2 rounded-lg transition-all duration-300 flex-shrink-0 hover:scale-110 micro-bounce text-white/60 hover:text-red-400"
+                              className="ml-4 btn-premium p-2 rounded-lg transition-all duration-300 flex-shrink-0 hover:bg-red-500/20 hover:border-red-400/30 text-white/60 hover:text-red-400"
                               disabled={currentQueueIndex === index && isQueuePlaying}
+                              title="Remove from queue (returns to main content)"
                             >
-                              ✕
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
                             </button>
                           </div>
                         ))}
@@ -1277,99 +1506,22 @@ export default function ReadPage() {
                     </>
                   )}
 
-                  {/* Playback Control Bar */}
-                  <div className="mt-6 glass-card rounded-xl p-4 neon-glow">
-                    {/* Progress Bar */}
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between text-white/70 text-xs mb-2 font-mono-enhanced">
-                        <span>{formatControlsTime(controlsCurrentTime)}</span>
-                        <span>{formatControlsTime(duration || 0)}</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden progress-enhanced relative cursor-pointer"
-                           onClick={(e) => {
-                             if (audioRef.current && duration > 0) {
-                               const rect = e.currentTarget.getBoundingClientRect();
-                               const clickX = e.clientX - rect.left;
-                               const percentage = clickX / rect.width;
-                               const seekTime = percentage * duration;
-                               audioRef.current.currentTime = seekTime;
-                             }
-                           }}>
-                        <div 
-                          className="h-full bg-gradient-to-r from-white/90 to-white/60 rounded-full transition-all duration-300 shadow-lg"
-                          style={{ width: `${controlsProgress}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Control Buttons */}
-                    <div className="flex items-center justify-center gap-4">
-                      {/* Shuffle */}
-                      <button
-                        onClick={handleControlsShuffle}
-                        disabled={listeningQueue.length === 0}
-                        className={`p-2 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
-                          controlsShuffle ? 'bg-white/20 text-white neon-glow' : 'text-white/60 hover:bg-white/10 hover:text-white'
-                        }`}
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h6l4 4-4 4H4m16-8v8a4 4 0 01-8 0V8a4 4 0 018 0zM4 20h6l4-4-4-4H4" />
-                        </svg>
-                      </button>
-
-                      {/* Previous */}
-                      <button
-                        onClick={handleControlsPrevious}
-                        disabled={!isQueuePlaying || currentQueueIndex <= 0}
-                        className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
-                        </svg>
-                      </button>
-
-                      {/* Play/Pause */}
-                      <button
-                        onClick={handleControlsPlayPause}
-                        disabled={listeningQueue.length === 0 && !audioUrl}
-                        className="p-3 btn-premium rounded-full transition-all duration-300 hover:scale-110 neon-glow shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                      >
-                        {controlsPlaying || isPlaying ? (
-                          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                          </svg>
+                  {/* Queue Status - Simple and Clean */}
+                  {listeningQueue.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-white/10">
+                      <div className="text-center text-sm text-white/60 font-mono-enhanced">
+                        {isQueuePlaying ? (
+                          <div className="flex items-center justify-center gap-2 text-white/80">
+                            <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
+                            <span>Playing: {currentQueueIndex + 1} of {listeningQueue.length}</span>
+                          </div>
                         ) : (
-                          <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M8 5v14l11-7z" />
-                          </svg>
+                          <span>{listeningQueue.length} items ready to play</span>
                         )}
-                      </button>
-
-                      {/* Next */}
-                      <button
-                        onClick={handleControlsNext}
-                        disabled={!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1}
-                        className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
-                        </svg>
-                      </button>
-
-                      {/* Repeat */}
-                      <button
-                        onClick={handleControlsRepeat}
-                        disabled={listeningQueue.length === 0}
-                        className={`p-2 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
-                          controlsRepeat ? 'bg-white/20 text-white neon-glow' : 'text-white/60 hover:bg-white/10 hover:text-white'
-                        }`}
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                      </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
                 </div>
               </div>
             </div>
@@ -1440,8 +1592,38 @@ export default function ReadPage() {
 
                 {/* Control Buttons */}
                 <div className="flex items-center justify-between">
-                  {/* Left Side - Play/Pause/Stop/Maximize */}
+                  {/* Left Side - Queue Navigation & Playback Controls */}
                   <div className="flex items-center gap-2">
+                    {/* Shuffle - Only show when queue has items */}
+                    {listeningQueue.length > 1 && (
+                      <button
+                        onClick={handleControlsShuffle}
+                        className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-300 hover:scale-110 micro-bounce ${
+                          controlsShuffle ? 'bg-white/20 text-white neon-glow' : 'glass-card text-white/60 hover:bg-white/10 hover:text-white'
+                        }`}
+                        aria-label="Shuffle queue"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h6l4 4-4 4H4m16-8v8a4 4 0 01-8 0V8a4 4 0 018 0zM4 20h6l4-4-4-4H4" />
+                        </svg>
+                      </button>
+                    )}
+
+                    {/* Previous - Only show when queue is playing */}
+                    {isQueuePlaying && listeningQueue.length > 1 && (
+                      <button
+                        onClick={handleControlsPrevious}
+                        disabled={currentQueueIndex <= 0}
+                        className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+                        aria-label="Previous track"
+                      >
+                        <svg className="w-4 h-4 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
+                        </svg>
+                      </button>
+                    )}
+
+                    {/* Play/Pause - Main control */}
                     <button
                       onClick={handlePlayPause}
                       disabled={!audioUrl && listeningQueue.length === 0}
@@ -1462,6 +1644,35 @@ export default function ReadPage() {
                         </svg>
                       )}
                     </button>
+
+                    {/* Next - Only show when queue is playing */}
+                    {isQueuePlaying && listeningQueue.length > 1 && (
+                      <button
+                        onClick={handleControlsNext}
+                        disabled={currentQueueIndex >= listeningQueue.length - 1}
+                        className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+                        aria-label="Next track"
+                      >
+                        <svg className="w-4 h-4 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
+                        </svg>
+                      </button>
+                    )}
+
+                    {/* Repeat - Only show when queue has items */}
+                    {listeningQueue.length > 0 && (
+                      <button
+                        onClick={handleControlsRepeat}
+                        className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-300 hover:scale-110 micro-bounce ${
+                          controlsRepeat ? 'bg-white/20 text-white neon-glow' : 'glass-card text-white/60 hover:bg-white/10 hover:text-white'
+                        }`}
+                        aria-label="Repeat queue"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      </button>
+                    )}
                     
                     <button
                       onClick={handleStop}
@@ -1493,12 +1704,18 @@ export default function ReadPage() {
                   <div className="flex flex-col items-center gap-2 text-sm text-white/70">
                     {/* Queue Status */}
                     {isQueuePlaying && listeningQueue.length > 0 && currentQueueIndex !== -1 && (
-                      <span className="flex items-center gap-2 glass-card px-3 py-1 rounded-lg">
-                        <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
-                        <span className="font-medium text-xs font-mono-enhanced">
-                          Queue: {currentQueueIndex + 1} / {listeningQueue.length} - {listeningQueue[currentQueueIndex]?.title}
+                      <div className="flex items-center gap-3 glass-card px-4 py-2 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
+                          <span className="font-medium text-xs font-mono-enhanced text-white/70">
+                            {currentQueueIndex + 1} of {listeningQueue.length}
+                          </span>
+                        </div>
+                        <div className="h-3 w-px bg-white/30"></div>
+                        <span className="font-medium text-xs text-white/90 truncate max-w-[200px] font-mono-enhanced">
+                          {listeningQueue[currentQueueIndex]?.title}
                         </span>
-                      </span>
+                      </div>
                     )}
                     
                     {/* Individual Section Status */}
@@ -1545,12 +1762,14 @@ export default function ReadPage() {
                         <button
                           key={speed}
                           onClick={() => handleSpeedChange(speed)}
-                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-all duration-300 hover:scale-105 font-mono-enhanced ${
-                            playbackRate === speed
-                              ? 'btn-premium'
-                              : 'glass-card text-white/70 hover:bg-white/10'
+                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors duration-150 hover:scale-105 font-mono-enhanced border ${
+                            hasSelectedSpeed && playbackRate === speed
+                              ? 'bg-white/20 text-white border-white/30 shadow-sm'
+                              : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white/90 hover:border-white/20'
                           }`}
-                          aria-label={`Set speed to ${speed}x`}
+                          role="button"
+                          aria-pressed={hasSelectedSpeed && playbackRate === speed}
+                          aria-label={`Set playback speed to ${speed}x${hasSelectedSpeed && playbackRate === speed ? ' (currently selected)' : ''}`}
                         >
                           {speed}x
                         </button>
@@ -1559,6 +1778,222 @@ export default function ReadPage() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Maximized Player Overlay */}
+      {isMaximized && (
+        <div className="fixed inset-0 bg-black/95 backdrop-blur-sm z-50 flex flex-col">
+          {/* Header with Close Button */}
+          <div className="flex justify-between items-center p-6 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div className="w-3 h-3 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
+              <span className="text-lg font-semibold font-mono-enhanced text-gradient">Narrate Player</span>
+            </div>
+            <button
+              onClick={() => setIsMaximized(false)}
+              className="w-10 h-10 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 neon-glow flex items-center justify-center"
+              aria-label="Close maximized player"
+            >
+              <svg className="w-5 h-5 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          {/* Main Content Area */}
+          <div className="flex-1 flex flex-col overflow-y-auto">
+            <div className="w-full max-w-5xl mx-auto p-6 text-center">
+
+            {/* Now Playing Info - Compact */}
+            <div className="mb-6">
+              <h2 className="text-xl font-bold text-white mb-1 font-mono-enhanced">
+                {isQueuePlaying && listeningQueue.length > 0 && currentQueueIndex !== -1 
+                  ? listeningQueue[currentQueueIndex]?.title 
+                  : currentPlayingSection === 'summary' 
+                    ? 'Summary' 
+                    : currentPlayingSection?.startsWith('section-') 
+                      ? `Section ${parseInt(currentPlayingSection.replace('section-', '')) + 1}` 
+                      : 'Now Playing'
+                }
+              </h2>
+              <p className="text-white/60 text-xs font-mono-enhanced">
+                {isQueuePlaying && listeningQueue.length > 0 
+                  ? `${currentQueueIndex + 1} of ${listeningQueue.length} in queue`
+                  : scrapedData?.title
+                }
+              </p>
+            </div>
+
+            {/* Large Progress Bar - Compact */}
+            <div className="mb-6">
+              <div className="relative h-2 bg-white/20 rounded-full overflow-hidden">
+                <div 
+                  className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-400 to-purple-400 transition-all duration-300"
+                  style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                ></div>
+                <input
+                  type="range"
+                  min={0}
+                  max={duration || 0}
+                  value={currentTime}
+                  onChange={(e) => handleSeek(Number(e.target.value))}
+                  className="absolute inset-0 w-full h-2 opacity-0 cursor-pointer"
+                  aria-label="Audio progress"
+                />
+              </div>
+              <div className="flex justify-between text-xs text-white/70 mt-1 font-mono-enhanced">
+                <span>{formatTime(currentTime)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+
+            {/* Large Controls - Always Visible */}
+            <div className="flex items-center justify-center gap-6 mb-6">
+              {/* Restart */}
+              <button
+                onClick={() => {
+                  if (audioRef.current) {
+                    audioRef.current.currentTime = 0;
+                    setCurrentWordIndex(-1);
+                  }
+                }}
+                disabled={!audioUrl && listeningQueue.length === 0}
+                className="flex items-center justify-center w-12 h-12 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Restart from beginning"
+              >
+                <svg className="w-6 h-6 text-white/70" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+                </svg>
+              </button>
+
+              {/* Previous */}
+              <button
+                onClick={handleControlsPrevious}
+                disabled={!isQueuePlaying || currentQueueIndex <= 0 || listeningQueue.length <= 1}
+                className="flex items-center justify-center w-12 h-12 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Previous track"
+              >
+                <svg className="w-6 h-6 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+
+              {/* Play/Pause - Perfectly Centered */}
+              <button
+                onClick={handlePlayPause}
+                disabled={!audioUrl && listeningQueue.length === 0}
+                className={`relative flex items-center justify-center w-16 h-16 rounded-full transition-all duration-300 hover:scale-110 neon-glow ${
+                  (isQueuePlaying ? controlsPlaying : isPlaying)
+                    ? 'bg-red-500/20 text-red-400 border border-red-400/30'
+                    : 'btn-premium'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                aria-label={(isQueuePlaying ? controlsPlaying : isPlaying) ? 'Pause' : 'Play'}
+              >
+                {(isQueuePlaying ? controlsPlaying : isPlaying) ? (
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6" />
+                  </svg>
+                ) : (
+                  <svg className="w-8 h-8 absolute" fill="currentColor" viewBox="0 0 24 24" style={{ left: '50%', top: '50%', transform: 'translate(-47%, -50%)' }}>
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Next */}
+              <button
+                onClick={handleControlsNext}
+                disabled={!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1 || listeningQueue.length <= 1}
+                className="flex items-center justify-center w-12 h-12 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Next track"
+              >
+                <svg className="w-6 h-6 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+
+              {/* Loop/Repeat */}
+              <button
+                onClick={handleControlsRepeat}
+                disabled={listeningQueue.length === 0}
+                className={`flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
+                  controlsRepeat ? 'bg-white/20 text-white neon-glow border border-white/30' : 'glass-card text-white/60 hover:bg-white/10 hover:text-white'
+                }`}
+                aria-label="Loop current track"
+              >
+                <svg className="w-6 h-6 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Speed Controls - Compact */}
+            <div className="flex items-center justify-center gap-2 mb-4">
+              <span className="text-xs text-white/50 font-mono-enhanced">Speed:</span>
+              <div className="flex items-center gap-1">
+                {speedOptions.map((speed) => (
+                  <button
+                    key={speed}
+                    onClick={() => handleSpeedChange(speed)}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors duration-150 hover:scale-105 font-mono-enhanced border ${
+                      hasSelectedSpeed && playbackRate === speed
+                        ? 'bg-white/20 text-white border-white/30 shadow-sm'
+                        : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white/90 hover:border-white/20'
+                    }`}
+                    role="button"
+                    aria-pressed={hasSelectedSpeed && playbackRate === speed}
+                    aria-label={`Set playback speed to ${speed}x${hasSelectedSpeed && playbackRate === speed ? ' (currently selected)' : ''}`}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* All Words Display with Real-time Highlighting */}
+            <div className="glass-card p-8 rounded-lg mb-20 min-h-[400px]" ref={contentRef}>
+              <div className="text-sm text-white/60 mb-6 font-mono-enhanced text-center">
+                Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} of {wordsData.filter(word => !word.isWhitespace).length}
+              </div>
+              <div className="text-lg leading-9 font-mono-enhanced text-left space-y-2" style={{ wordSpacing: '0.2em' }}>
+                {wordsData.length > 0 ? (
+                  wordsData.map((wordData, index) => (
+                    <span
+                      key={index}
+                      ref={currentWordIndex === index ? highlightedWordRef : null}
+                      className={`word-highlight inline-block ${
+                        wordData.isWhitespace 
+                          ? '' 
+                          : currentWordIndex === index && isPlaying
+                            ? 'active'
+                            : currentWordIndex > index
+                              ? 'text-white/60'
+                              : 'text-white/80 hover:text-white/90'
+                      } ${!wordData.isWhitespace ? 'cursor-pointer px-1 py-1 rounded transition-all duration-75 mx-0.5' : ''}`}
+                      onClick={() => !wordData.isWhitespace && handleWordClick(index)}
+                    >
+                      {wordData.word}
+                    </span>
+                  ))
+                ) : (
+                  // Show all text immediately while word timings are being prepared
+                  <div className="text-white/80">
+                    {currentPlayingText.split(/(\s+)/).map((part, index) => (
+                      <span
+                        key={index}
+                        className={part.trim() ? 'hover:text-white/90 cursor-pointer px-1 py-1 rounded transition-all duration-75 mx-0.5' : ''}
+                      >
+                        {part}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
             </div>
           </div>
         </div>
