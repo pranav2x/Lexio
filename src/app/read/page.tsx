@@ -642,24 +642,24 @@ export default function ReadPage() {
     return () => audioElement.removeEventListener('ended', handleAudioEnd);
   }, [isQueuePlaying, playNextInQueue]);
 
-  // Simplified word timing generation optimized for ElevenLabs TTS
+  // Optimized word timing generation with better start timing
   const generateWordTimings = useCallback((text: string, audioDuration: number): WordData[] => {
     const words = text.split(/(\s+)/);
     const nonWhitespaceWords = words.filter(word => word.trim() !== '');
     
-    // Use actual audio duration to calculate precise timing
-    const totalSpeechTime = audioDuration * 0.95; // Account for silence at start/end
+    // More precise timing calculation
+    const totalSpeechTime = audioDuration * 0.98; // Less silence padding
     const averageWordDuration = totalSpeechTime / nonWhitespaceWords.length;
     
-    let currentTime = audioDuration * 0.025; // Small offset for audio start
+    let currentTime = 0.05; // Fixed small start offset instead of percentage
     const wordTimings: WordData[] = [];
     
     words.forEach((word, index) => {
       const isWhitespace = word.trim() === '';
       
       if (isWhitespace) {
-        // Minimal pause for whitespace
-        const pauseDuration = 0.02;
+        // Very minimal pause for whitespace to keep timing tight
+        const pauseDuration = 0.01;
         wordTimings.push({
           word,
           index,
@@ -669,18 +669,17 @@ export default function ReadPage() {
         });
         currentTime += pauseDuration;
       } else {
-        // More accurate duration based on word characteristics
+        // Base duration with length adjustment
         let wordDuration = averageWordDuration;
         
-        // Adjust based on word length
-        const baseLength = 5;
-        const lengthFactor = Math.pow(word.length / baseLength, 0.6);
+        // More conservative length factor to prevent timing drift
+        const lengthFactor = Math.pow(word.length / 5, 0.5);
         wordDuration *= lengthFactor;
         
-        // Punctuation adds pause time
+        // Reduced punctuation pauses to prevent accumulating delays
         let pauseAfter = 0;
-        if (/[.!?]$/.test(word)) pauseAfter = averageWordDuration * 0.4;
-        else if (/[,;:]$/.test(word)) pauseAfter = averageWordDuration * 0.2;
+        if (/[.!?]$/.test(word)) pauseAfter = averageWordDuration * 0.25;
+        else if (/[,;:]$/.test(word)) pauseAfter = averageWordDuration * 0.1;
         
         wordTimings.push({
           word,
@@ -694,47 +693,68 @@ export default function ReadPage() {
       }
     });
     
-    // Final normalization to exact audio duration
+    // Normalize to exact audio duration
     const totalCalculatedTime = currentTime;
-    const scaleFactor = audioDuration / totalCalculatedTime;
+    const scaleFactor = (audioDuration - 0.05) / (totalCalculatedTime - 0.05); // Account for start offset
     
     wordTimings.forEach(timing => {
-      timing.startTime *= scaleFactor;
-      timing.endTime *= scaleFactor;
+      if (!timing.isWhitespace) {
+        timing.startTime = 0.05 + (timing.startTime - 0.05) * scaleFactor;
+        timing.endTime = 0.05 + (timing.endTime - 0.05) * scaleFactor;
+      }
     });
     
     return wordTimings;
   }, []);
 
-  // Speed-optimized word finding with aggressive lookahead for faster speeds
+  // Enhanced word finding with special handling for start of audio
   const findCurrentWordIndex = useCallback((currentTime: number): number => {
     if (wordsData.length === 0 || currentTime < 0) return -1;
     
-    // More aggressive lookahead for faster speeds to prevent lag
-    const speedLookahead = playbackRate >= 1.5 ? 0.15 : playbackRate >= 1.25 ? 0.1 : 0.05;
+    // Lookahead timing
+    const speedLookahead = playbackRate >= 1.5 ? 0.2 : playbackRate >= 1.25 ? 0.12 : 0.06;
     const lookaheadTime = currentTime + speedLookahead;
     
-    // Find word that we're currently in or about to enter
+    // Special handling for very start of audio (first 2 seconds)
+    if (currentTime < 2.0) {
+      // More aggressive progression at the start to prevent sticking
+      for (let i = 0; i < wordsData.length; i++) {
+        const word = wordsData[i];
+        if (!word.isWhitespace) {
+          // If we're past the word's start time, move to it immediately
+          if (currentTime >= word.startTime - 0.05) {
+            return i;
+          }
+        }
+      }
+    }
+    
+    // Primary check: lookahead time within word bounds
     for (let i = 0; i < wordsData.length; i++) {
       const word = wordsData[i];
       if (!word.isWhitespace) {
-        // Check if lookahead time is within this word's timing
         if (lookaheadTime >= word.startTime && lookaheadTime <= word.endTime) {
           return i;
         }
-        // Or if current time is within word (fallback)
+      }
+    }
+    
+    // Secondary check: current time within word bounds
+    for (let i = 0; i < wordsData.length; i++) {
+      const word = wordsData[i];
+      if (!word.isWhitespace) {
         if (currentTime >= word.startTime && currentTime <= word.endTime) {
           return i;
         }
       }
     }
     
-    // If no exact match, find closest upcoming word
+    // Tertiary check: very close upcoming word
     for (let i = 0; i < wordsData.length; i++) {
       const word = wordsData[i];
       if (!word.isWhitespace && word.startTime > currentTime) {
-        // If the next word is very close, highlight it
-        if (word.startTime - currentTime < speedLookahead * 1.5) {
+        const timeUntilWord = word.startTime - currentTime;
+        if (timeUntilWord < speedLookahead * 1.2) {
           return i;
         }
         break;
@@ -823,8 +843,8 @@ export default function ReadPage() {
   useEffect(() => {
     if (isPlaying && wordsData.length > 0 && currentTime >= 0 && !isNaN(currentTime)) {
       
-      // Higher update frequency for better sync, especially at fast speeds
-      const updateFrequency = playbackRate >= 1.5 ? 8 : 12; // Higher frequency for faster speeds
+      // Ultra-high update frequency for silky smooth highlighting
+      const updateFrequency = playbackRate >= 1.5 ? 6 : 10; // Even higher frequency for 1.5x speed
       
       let animationId: number;
       let lastUpdateTime = 0;
