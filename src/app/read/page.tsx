@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useLexioState, useLexioActions } from "@/lib/store";
 import { extractSummary } from "@/lib/firecrawl";
 import { generateSpeech, cleanupAudioUrl, estimateTextDuration, clearTTSCache, getTTSCacheStats } from "@/lib/tts";
+import VoiceSelector from "@/components/VoiceSelector";
 
 interface WordData {
   word: string;
@@ -24,7 +25,7 @@ type PlayingSection = 'summary' | `section-${number}` | null;
 
 export default function ReadPage() {
   const router = useRouter();
-  const { scrapedData, currentUrl } = useLexioState();
+  const { scrapedData, currentUrl, selectedVoiceId } = useLexioState();
   const { clearAll } = useLexioActions();
   
   // Audio state
@@ -302,7 +303,7 @@ export default function ReadPage() {
         cleanupAudioUrl(audioUrl);
       }
       
-      const result = await generateSpeech(prevItem.content);
+              const result = await generateSpeech(prevItem.content, {}, selectedVoiceId);
       setAudioUrl(result.audioUrl);
       
       // Auto-play previous item with proper error handling
@@ -349,7 +350,7 @@ export default function ReadPage() {
         cleanupAudioUrl(audioUrl);
       }
       
-      const result = await generateSpeech(nextItem.content);
+      const result = await generateSpeech(nextItem.content, {}, selectedVoiceId);
       setAudioUrl(result.audioUrl);
       
       // Auto-play next item with proper error handling
@@ -454,7 +455,7 @@ export default function ReadPage() {
       console.log('📡 Queue: Generating audio...');
       
       // Generate audio
-      const result = await generateSpeech(firstItem.content);
+      const result = await generateSpeech(firstItem.content, {}, selectedVoiceId);
       
       console.log('✅ Queue: Audio generated, setting up player...');
       
@@ -592,7 +593,7 @@ export default function ReadPage() {
         cleanupAudioUrl(audioUrl);
       }
       
-      const result = await generateSpeech(nextItem.content);
+      const result = await generateSpeech(nextItem.content, {}, selectedVoiceId);
       setAudioUrl(result.audioUrl);
       
       // Update cache stats after generating audio
@@ -621,7 +622,7 @@ export default function ReadPage() {
       setCurrentQueueIndex(-1);
       setControlsPlaying(false);
     }
-  }, [isQueuePlaying, currentQueueIndex, listeningQueue, audioUrl, controlsRepeat, cleanupAudioUrl, generateSpeech]);
+  }, [isQueuePlaying, currentQueueIndex, listeningQueue, audioUrl, controlsRepeat, cleanupAudioUrl, generateSpeech, selectedVoiceId]);
 
   // Handle audio end for queue progression
   useEffect(() => {
@@ -684,8 +685,15 @@ export default function ReadPage() {
         else if (/[,;:]$/.test(word)) wordDuration *= 1.2; // Clause endings
         
         // Adjust for complexity (technical terms, numbers, etc.)
-        if (/\d/.test(word)) wordDuration *= 1.3; // Numbers
+        if (/\d/.test(word)) wordDuration *= 1.25; // Numbers
         if (/[A-Z]{2,}/.test(word)) wordDuration *= 1.2; // Acronyms
+        if (/^[A-Z][a-z]*$/.test(word)) wordDuration *= 1.05; // Proper nouns
+        
+        // Adjust for common words (spoken faster)
+        const commonWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must'];
+        if (commonWords.includes(word.toLowerCase().replace(/[^\w]/g, ''))) {
+          wordDuration *= 0.85;
+        }
         
         wordTimings.push({
           word,
@@ -699,52 +707,71 @@ export default function ReadPage() {
       }
     });
     
-    // Normalize timings to match actual audio duration
+    // Normalize timings to match actual audio duration with precision
     const totalCalculatedTime = currentTime;
     const scaleFactor = audioDuration / totalCalculatedTime;
     
     wordTimings.forEach(timing => {
       timing.startTime *= scaleFactor;
       timing.endTime *= scaleFactor;
+      
+      // Round to millisecond precision for ultra-accurate sync at all speeds
+      timing.startTime = Math.round(timing.startTime * 1000) / 1000;
+      timing.endTime = Math.round(timing.endTime * 1000) / 1000;
     });
     
     return wordTimings;
   }, []);
 
-  // Enhanced word finding with precise timing and lookahead
+  // Ultra-precise word finding with perfect speed synchronization
   const findCurrentWordIndex = useCallback((currentTime: number): number => {
     if (wordsData.length === 0 || currentTime < 0) return -1;
     
-    // First, try to find exact match with small tolerance
+    // Use adaptive lookahead based on playback rate for perfect sync
+    // Faster speeds need more aggressive lookahead, slower speeds need less
+    const baseLookaheadMs = 25; // Base lookahead in milliseconds
+    const speedAdjustedLookahead = (baseLookaheadMs * playbackRate) / 1000;
+    const lookaheadTime = currentTime + speedAdjustedLookahead;
+    
+    // First pass: Find exact timing match with speed-optimized tolerance
     for (let i = 0; i < wordsData.length; i++) {
       const word = wordsData[i];
       if (!word.isWhitespace) {
-        // Use a small lookahead for better sync (100ms ahead)
-        const lookaheadTime = currentTime + 0.1;
-        if (lookaheadTime >= word.startTime && currentTime <= word.endTime) {
+        // Precise timing window that accounts for playback speed
+        const wordStart = word.startTime;
+        const wordEnd = word.endTime;
+        
+        // Check if we're within or approaching the word timing
+        if (currentTime >= wordStart - speedAdjustedLookahead && 
+            lookaheadTime <= wordEnd + speedAdjustedLookahead) {
           return i;
         }
       }
     }
     
-    // If no exact match, find the most appropriate word
+    // Second pass: Find closest word with ultra-precise distance calculation
     let bestIndex = -1;
     let smallestDistance = Infinity;
     
     for (let i = 0; i < wordsData.length; i++) {
       const word = wordsData[i];
       if (!word.isWhitespace) {
-        // Calculate distance with preference for upcoming words
+        const wordStart = word.startTime;
+        const wordEnd = word.endTime;
+        const wordMidpoint = (wordStart + wordEnd) / 2;
+        
         let distance;
-        if (currentTime < word.startTime) {
-          // Upcoming word - prefer closer ones
-          distance = word.startTime - currentTime;
-        } else if (currentTime > word.endTime) {
-          // Past word - penalize more
-          distance = (currentTime - word.endTime) * 2;
+        
+        if (currentTime < wordStart) {
+          // Upcoming word - distance to start, scaled by speed for responsiveness
+          distance = (wordStart - currentTime) / playbackRate;
+        } else if (currentTime > wordEnd) {
+          // Past word - distance from end, heavily penalized
+          distance = (currentTime - wordEnd) * 2 * playbackRate;
         } else {
-          // We're in the word timing - this should be the current word
-          distance = 0;
+          // We're within the word - calculate position-based priority
+          // Prefer words we're closer to the center of
+          distance = Math.abs(currentTime - wordMidpoint) * 0.05;
         }
         
         if (distance < smallestDistance) {
@@ -755,7 +782,7 @@ export default function ReadPage() {
     }
     
     return bestIndex;
-  }, [wordsData]);
+  }, [wordsData, playbackRate]);
 
   // Auto-scroll to current word with improved performance
   const scrollToCurrentWord = useCallback(() => {
@@ -815,7 +842,7 @@ export default function ReadPage() {
         }
 
       setCurrentPlayingText(textToSpeak);
-      const result = await generateSpeech(textToSpeak);
+      const result = await generateSpeech(textToSpeak, {}, selectedVoiceId);
       setAudioUrl(result.audioUrl);
       
       // Update cache stats after generating audio
@@ -832,29 +859,50 @@ export default function ReadPage() {
     }
   }, [scrapedData]);
 
-  // Ultra-responsive word index updates with zero delay
+  // Ultra-responsive word index updates with speed-optimized precision
   useEffect(() => {
     if (isPlaying && wordsData.length > 0 && currentTime >= 0 && !isNaN(currentTime)) {
-      // Use requestAnimationFrame for the smoothest possible updates
-      const updateWordIndex = () => {
-        const newWordIndex = findCurrentWordIndex(currentTime);
+      
+      // Calculate optimal update frequency based on playback speed
+      // Faster speeds need more frequent updates for perfect sync
+      const baseUpdateFrequency = 16; // ~60fps base
+      const speedOptimizedFrequency = Math.max(8, baseUpdateFrequency / playbackRate);
+      
+      let animationId: number;
+      let lastUpdateTime = 0;
+      
+      const updateWordIndex = (timestamp: number) => {
+        // Throttle updates based on speed-optimized frequency
+        if (timestamp - lastUpdateTime >= speedOptimizedFrequency) {
+          const newWordIndex = findCurrentWordIndex(currentTime);
+          
+          // Update immediately if we have a valid new index
+          if (newWordIndex !== currentWordIndex && 
+              newWordIndex !== -1 && 
+              newWordIndex < wordsData.length &&
+              !wordsData[newWordIndex]?.isWhitespace) {
+            setCurrentWordIndex(newWordIndex);
+          }
+          
+          lastUpdateTime = timestamp;
+        }
         
-        // Update immediately if we have a valid new index
-        if (newWordIndex !== currentWordIndex && 
-            newWordIndex !== -1 && 
-            newWordIndex < wordsData.length &&
-            !wordsData[newWordIndex]?.isWhitespace) {
-          setCurrentWordIndex(newWordIndex);
+        // Continue the animation loop for continuous updates
+        if (isPlaying) {
+          animationId = requestAnimationFrame(updateWordIndex);
         }
       };
       
-      // Use both immediate update and RAF for maximum responsiveness
-      updateWordIndex();
-      const rafId = requestAnimationFrame(updateWordIndex);
+      // Start the precision update loop
+      animationId = requestAnimationFrame(updateWordIndex);
       
-      return () => cancelAnimationFrame(rafId);
+      return () => {
+        if (animationId) {
+          cancelAnimationFrame(animationId);
+        }
+      };
     }
-  }, [currentTime, isPlaying, wordsData, findCurrentWordIndex, currentWordIndex]);
+  }, [currentTime, isPlaying, wordsData, findCurrentWordIndex, currentWordIndex, playbackRate]);
 
   // Update cache stats in development
   useEffect(() => {
@@ -957,14 +1005,18 @@ export default function ReadPage() {
   };
 
   const handlePlayPause = () => {
+    console.log('🎮 Play/Pause clicked - Queue length:', listeningQueue.length, 'audioUrl:', !!audioUrl, 'isQueuePlaying:', isQueuePlaying);
+    
     // If there are items in the queue and nothing is currently playing, start the queue
     if (listeningQueue.length > 0 && !audioUrl && !isQueuePlaying) {
+      console.log('🚀 Starting queue playback...');
       playQueue();
       return;
     }
 
     // If queue is playing, pause/resume the current audio
     if (isQueuePlaying && audioRef.current) {
+      console.log('⏯️ Toggling queue playback - Currently playing:', isPlaying);
       if (isPlaying) {
         audioRef.current.pause();
       } else {
@@ -977,6 +1029,7 @@ export default function ReadPage() {
       return;
     }
 
+    console.log('🎵 Individual audio control - audioRef:', !!audioRef.current, 'audioUrl:', !!audioUrl);
     if (!audioRef.current || !audioUrl) return;
 
     if (isPlaying) {
@@ -1528,7 +1581,11 @@ export default function ReadPage() {
           </div>
 
           {/* Currently Playing Info & Controls - Separate section below */}
-          <div className="mt-12 xl:mt-16">
+          <div className={`mt-12 xl:mt-16 ${
+            (audioUrl || listeningQueue.length > 0) && !isMaximized 
+              ? 'pb-32 sm:pb-28' 
+              : ''
+          }`}>
             <div className="max-w-2xl">
               {/* Currently Playing Card */}
               {currentPlayingSection && audioUrl && (
@@ -1560,16 +1617,16 @@ export default function ReadPage() {
       {/* Bottom Audio Control Bar */}
       {(audioUrl || listeningQueue.length > 0) && !isMaximized && (
         <div className="fixed bottom-0 left-0 right-0 z-50 glass-card border-t border-white/10 backdrop-blur-xl">
-          <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div className="max-w-4xl mx-auto">
-              <div className="flex flex-col gap-3">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-2">
+            <div className="max-w-6xl mx-auto">
+              <div className="flex flex-col gap-1">
                 {/* Progress Bar */}
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
                   <span className="text-xs text-white/70 min-w-[3rem] text-right font-mono-enhanced">
                     {formatTime(currentTime)}
                   </span>
                   <div className="flex-1 relative">
-                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                    <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
                       <div 
                         className="h-full bg-gradient-to-r from-white/90 to-white/60 transition-all duration-300 shadow-lg"
                         style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
@@ -1581,7 +1638,7 @@ export default function ReadPage() {
                       max={duration || 0}
                       value={currentTime}
                       onChange={(e) => handleSeek(Number(e.target.value))}
-                      className="absolute inset-0 w-full h-2 opacity-0 cursor-pointer"
+                      className="absolute inset-0 w-full h-1.5 opacity-0 cursor-pointer"
                       aria-label="Audio progress"
                     />
                   </div>
@@ -1591,190 +1648,185 @@ export default function ReadPage() {
                 </div>
 
                 {/* Control Buttons */}
-                <div className="flex items-center justify-between">
-                  {/* Left Side - Queue Navigation & Playback Controls */}
-                  <div className="flex items-center gap-2">
-                    {/* Shuffle - Only show when queue has items */}
-                    {listeningQueue.length > 1 && (
-                      <button
-                        onClick={handleControlsShuffle}
-                        className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-300 hover:scale-110 micro-bounce ${
+                <div className="flex items-center justify-center gap-6">
+                  {/* Left & Center Group */}
+                  <div className="flex items-center gap-4">
+                                          {/* Left Side - Queue Navigation & Playback Controls */}
+                      <div className="flex items-center gap-1">
+                      {/* Shuffle - Only show when queue has items */}
+                      {listeningQueue.length > 1 && (
+                        <button
+                          onClick={handleControlsShuffle}
+                                                  className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-150 hover:scale-105 micro-bounce ${
                           controlsShuffle ? 'bg-white/20 text-white neon-glow' : 'glass-card text-white/60 hover:bg-white/10 hover:text-white'
                         }`}
                         aria-label="Shuffle queue"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h6l4 4-4 4H4m16-8v8a4 4 0 01-8 0V8a4 4 0 018 0zM4 20h6l4-4-4-4H4" />
-                        </svg>
-                      </button>
-                    )}
-
-                    {/* Previous - Only show when queue is playing */}
-                    {isQueuePlaying && listeningQueue.length > 1 && (
-                      <button
-                        onClick={handleControlsPrevious}
-                        disabled={currentQueueIndex <= 0}
-                        className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
-                        aria-label="Previous track"
-                      >
-                        <svg className="w-4 h-4 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
-                        </svg>
-                      </button>
-                    )}
-
-                    {/* Play/Pause - Main control */}
-                    <button
-                      onClick={handlePlayPause}
-                      disabled={!audioUrl && listeningQueue.length === 0}
-                      className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-300 hover:scale-110 neon-glow ${
-                        (isQueuePlaying ? controlsPlaying : isPlaying)
-                          ? 'bg-red-500/20 text-red-400 border border-red-400/30'
-                          : 'btn-premium'
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
-                      aria-label={(isQueuePlaying ? controlsPlaying : isPlaying) ? 'Pause' : 'Play'}
-                    >
-                      {(isQueuePlaying ? controlsPlaying : isPlaying) ? (
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6" />
-                        </svg>
-                      ) : (
-                        <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                      )}
-                    </button>
-
-                    {/* Next - Only show when queue is playing */}
-                    {isQueuePlaying && listeningQueue.length > 1 && (
-                      <button
-                        onClick={handleControlsNext}
-                        disabled={currentQueueIndex >= listeningQueue.length - 1}
-                        className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
-                        aria-label="Next track"
-                      >
-                        <svg className="w-4 h-4 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
-                        </svg>
-                      </button>
-                    )}
-
-                    {/* Repeat - Only show when queue has items */}
-                    {listeningQueue.length > 0 && (
-                      <button
-                        onClick={handleControlsRepeat}
-                        className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-300 hover:scale-110 micro-bounce ${
-                          controlsRepeat ? 'bg-white/20 text-white neon-glow' : 'glass-card text-white/60 hover:bg-white/10 hover:text-white'
-                        }`}
-                        aria-label="Repeat queue"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                      </button>
-                    )}
-                    
-                    <button
-                      onClick={handleStop}
-                      disabled={!audioUrl && !isQueuePlaying}
-                      className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed"
-                      aria-label="Stop"
-                    >
-                      <svg className="w-4 h-4 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 10h6v4H9z" />
-                      </svg>
-                    </button>
-
-                    {/* Maximize Button - Only show when queue is playing and not maximized */}
-                    {isQueuePlaying && !isMaximized && (
-                      <button
-                        onClick={() => setIsMaximized(true)}
-                        className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 neon-glow"
-                        aria-label="Maximize Player"
-                      >
-                        <svg className="w-4 h-4 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Center - Current Section and Word Indicator */}
-                  <div className="flex flex-col items-center gap-2 text-sm text-white/70">
-                    {/* Queue Status */}
-                    {isQueuePlaying && listeningQueue.length > 0 && currentQueueIndex !== -1 && (
-                      <div className="flex items-center gap-3 glass-card px-4 py-2 rounded-lg">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
-                          <span className="font-medium text-xs font-mono-enhanced text-white/70">
-                            {currentQueueIndex + 1} of {listeningQueue.length}
-                          </span>
-                        </div>
-                        <div className="h-3 w-px bg-white/30"></div>
-                        <span className="font-medium text-xs text-white/90 truncate max-w-[200px] font-mono-enhanced">
-                          {listeningQueue[currentQueueIndex]?.title}
-                        </span>
-                      </div>
-                    )}
-                    
-                    {/* Individual Section Status */}
-                    {currentPlayingSection && !isQueuePlaying && (
-                      <span className="flex items-center gap-2 glass-card px-3 py-1 rounded-lg">
-                        <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
-                        <span className="font-medium text-xs font-mono-enhanced">
-                          Playing: {
-                            currentPlayingSection === 'summary' ? 'Summary' :
-                            currentPlayingSection?.startsWith('section-') ? 
-                              `Section ${parseInt(currentPlayingSection.replace('section-', '')) + 1}` : 
-                              currentPlayingSection
-                          }
-                        </span>
-                      </span>
-                    )}
-                    
-                    {/* Word Progress */}
-                    {currentWordIndex !== -1 && wordsData[currentWordIndex] && (
-                      <span className="flex items-center gap-2 glass-card px-3 py-1 rounded-lg">
-                        <div className="w-2 h-2 bg-white/80 rounded-full animate-pulse"></div>
-                        <span className="font-medium text-xs font-mono-enhanced">
-                          Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} / {wordsData.filter(word => !word.isWhitespace).length}
-                        </span>
-                      </span>
-                    )}
-
-                    {/* Queue Available Indicator */}
-                    {!isQueuePlaying && !currentPlayingSection && listeningQueue.length > 0 && (
-                      <span className="flex items-center gap-2 glass-card px-3 py-1 rounded-lg">
-                        <div className="w-2 h-2 bg-blue-400/90 rounded-full animate-pulse"></div>
-                        <span className="font-medium text-xs font-mono-enhanced">
-                          {listeningQueue.length} items ready to play
-                        </span>
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Right Side - Speed Control */}
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-white/50 hidden sm:block font-mono-enhanced">Speed:</span>
-                    <div className="flex items-center gap-1">
-                      {speedOptions.map((speed) => (
-                        <button
-                          key={speed}
-                          onClick={() => handleSpeedChange(speed)}
-                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors duration-150 hover:scale-105 font-mono-enhanced border ${
-                            hasSelectedSpeed && playbackRate === speed
-                              ? 'bg-white/20 text-white border-white/30 shadow-sm'
-                              : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white/90 hover:border-white/20'
-                          }`}
-                          role="button"
-                          aria-pressed={hasSelectedSpeed && playbackRate === speed}
-                          aria-label={`Set playback speed to ${speed}x${hasSelectedSpeed && playbackRate === speed ? ' (currently selected)' : ''}`}
-                        >
-                          {speed}x
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h6l4 4-4 4H4m16-8v8a4 4 0 01-8 0V8a4 4 0 018 0zM4 20h6l4-4-4-4H4" />
+                          </svg>
                         </button>
-                      ))}
+                      )}
+
+                      {/* Previous - Only show when queue is playing */}
+                      {isQueuePlaying && listeningQueue.length > 1 && (
+                        <button
+                          onClick={handleControlsPrevious}
+                          disabled={currentQueueIndex <= 0}
+                          className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-150 hover:scale-105 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+                          aria-label="Previous track"
+                        >
+                          <svg className="w-4 h-4 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
+                          </svg>
+                        </button>
+                      )}
+
+                      {/* Play/Pause - Main control */}
+                      <button
+                        onClick={handlePlayPause}
+                        disabled={!audioUrl && listeningQueue.length === 0}
+                        className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-150 hover:scale-105 neon-glow ${
+                          (isQueuePlaying ? controlsPlaying : isPlaying)
+                            ? 'bg-red-500/20 text-red-400 border border-red-400/30'
+                            : 'btn-premium'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        aria-label={(isQueuePlaying ? controlsPlaying : isPlaying) ? 'Pause' : 'Play'}
+                      >
+                        {(isQueuePlaying ? controlsPlaying : isPlaying) ? (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        )}
+                      </button>
+
+                      {/* Next - Only show when queue is playing */}
+                      {isQueuePlaying && listeningQueue.length > 1 && (
+                        <button
+                          onClick={handleControlsNext}
+                          disabled={currentQueueIndex >= listeningQueue.length - 1}
+                          className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-150 hover:scale-105 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+                          aria-label="Next track"
+                        >
+                          <svg className="w-4 h-4 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
+                          </svg>
+                        </button>
+                      )}
+
+                      {/* Repeat - Only show when queue has items */}
+                      {listeningQueue.length > 0 && (
+                        <button
+                          onClick={handleControlsRepeat}
+                          className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-150 hover:scale-105 micro-bounce ${
+                            controlsRepeat ? 'bg-white/20 text-white neon-glow' : 'glass-card text-white/60 hover:bg-white/10 hover:text-white'
+                          }`}
+                          aria-label="Repeat queue"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                        </button>
+                      )}
+                      
+                      <button
+                        onClick={handleStop}
+                        disabled={!audioUrl && !isQueuePlaying}
+                        className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-150 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label="Stop"
+                      >
+                        <svg className="w-4 h-4 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 10h6v4H9z" />
+                        </svg>
+                      </button>
+
+                      {/* Maximize Button - Only show when queue is playing and not maximized */}
+                      {isQueuePlaying && !isMaximized && (
+                        <button
+                          onClick={() => setIsMaximized(true)}
+                          className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-150 hover:scale-105 neon-glow"
+                          aria-label="Maximize Player"
+                        >
+                          <svg className="w-4 h-4 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
+
+                    {/* Center - Status & Speed Control */}
+                    <div className="flex items-center gap-2">
+                      {/* Status Display */}
+                      <div className="flex items-center gap-1.5 text-sm text-white/70">
+                        {/* Queue Status */}
+                        {isQueuePlaying && listeningQueue.length > 0 && currentQueueIndex !== -1 && (
+                          <div className="flex items-center gap-2 glass-card px-2.5 py-1 rounded-lg">
+                            <div className="w-1.5 h-1.5 bg-white/90 rounded-full animate-pulse"></div>
+                            <span className="font-medium text-xs font-mono-enhanced text-white/70">
+                              {currentQueueIndex + 1} of {listeningQueue.length}
+                            </span>
+                          </div>
+                        )}
+                        
+                        {/* Individual Section Status */}
+                        {currentPlayingSection && !isQueuePlaying && (
+                          <div className="flex items-center gap-2 glass-card px-2.5 py-1 rounded-lg">
+                            <div className="w-1.5 h-1.5 bg-white/90 rounded-full animate-pulse"></div>
+                            <span className="font-medium text-xs font-mono-enhanced">
+                              Playing: {
+                                currentPlayingSection === 'summary' ? 'Summary' :
+                                currentPlayingSection?.startsWith('section-') ? 
+                                  `Section ${parseInt(currentPlayingSection.replace('section-', '')) + 1}` : 
+                                  currentPlayingSection
+                              }
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Queue Available Indicator */}
+                        {!isQueuePlaying && !currentPlayingSection && listeningQueue.length > 0 && (
+                          <div className="flex items-center gap-2 glass-card px-2.5 py-1 rounded-lg">
+                            <div className="w-1.5 h-1.5 bg-blue-400/90 rounded-full animate-pulse"></div>
+                            <span className="font-medium text-xs font-mono-enhanced">
+                              {listeningQueue.length} items ready to play
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Speed Control */}
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-white/50 hidden lg:block font-mono-enhanced">Speed:</span>
+                                                <div className="flex items-center gap-0.5">
+                          {speedOptions.map((speed) => (
+                            <button
+                              key={speed}
+                              onClick={() => handleSpeedChange(speed)}
+                              className={`px-2.5 py-1 rounded text-xs font-medium transition-all duration-150 font-mono-enhanced ${
+                              playbackRate === speed
+                                ? 'bg-white/15 text-white border border-white/30'
+                                : 'bg-white/5 text-white/70 border border-transparent hover:bg-white/10 hover:text-white/90 hover:border-white/20'
+                            }`}
+                              role="button"
+                              aria-pressed={playbackRate === speed}
+                              aria-label={`Set playback speed to ${speed}x${playbackRate === speed ? ' (currently selected)' : ''}`}
+                            >
+                              {speed}×
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Side - Voice Selector */}
+                  <div className="flex items-center">
+                    <VoiceSelector />
                   </div>
                 </div>
               </div>
@@ -1939,13 +1991,13 @@ export default function ReadPage() {
                     key={speed}
                     onClick={() => handleSpeedChange(speed)}
                     className={`px-3 py-1 rounded-md text-xs font-medium transition-colors duration-150 hover:scale-105 font-mono-enhanced border ${
-                      hasSelectedSpeed && playbackRate === speed
+                      playbackRate === speed
                         ? 'bg-white/20 text-white border-white/30 shadow-sm'
                         : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white/90 hover:border-white/20'
                     }`}
                     role="button"
-                    aria-pressed={hasSelectedSpeed && playbackRate === speed}
-                    aria-label={`Set playback speed to ${speed}x${hasSelectedSpeed && playbackRate === speed ? ' (currently selected)' : ''}`}
+                    aria-pressed={playbackRate === speed}
+                    aria-label={`Set playback speed to ${speed}x${playbackRate === speed ? ' (currently selected)' : ''}`}
                   >
                     {speed}x
                   </button>

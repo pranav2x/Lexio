@@ -84,33 +84,17 @@ Religious and cultural exchange marked the era, with Islam spreading through tra
 
 export default function App() {
   const [url, setUrl] = useState("");
-  const [developerMode, setDeveloperMode] = useState(false);
-  const [autoLaunched, setAutoLaunched] = useState(false);
   const router = useRouter();
   const { setScrapedData, setLoading, setError, setCurrentUrl } = useLexioActions();
   const { isLoading, error } = useLexioState();
 
-  // Auto-enable developer mode and launch in development
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development' && !autoLaunched && !isLoading) {
-      console.log('🚀 Development mode: Auto-launching lexio with sample content...');
-      setDeveloperMode(true);
-      setAutoLaunched(true);
-      
-      // Auto-launch after a brief delay to ensure state is set
-      setTimeout(() => {
-        handleDeveloperModeConversion();
-      }, 300);
-    }
-  }, [autoLaunched, isLoading]);
-
-  const handleDeveloperModeConversion = () => {
-    console.log('📄 Loading sample content for development...');
+  const handleCachedContentLoad = () => {
+    console.log('📄 Loading cached content with demo effect...');
     setLoading(true);
     setError(null);
     setCurrentUrl(DEVELOPER_MODE_DATA.url);
     
-    // Fast loading for development (minimal delay)
+    // Show loading spinner for 2 seconds for demo effect
     setTimeout(() => {
       setScrapedData({
         title: DEVELOPER_MODE_DATA.title,
@@ -120,21 +104,15 @@ export default function App() {
         sections: DEVELOPER_MODE_DATA.sections
       });
       setLoading(false);
-      console.log('✅ Sample content loaded, navigating to /read...');
+      console.log('✅ Cached content loaded, navigating to /read...');
       router.push("/read");
-    }, 200);
+    }, 2000); // 2 second delay for demo effect
   };
 
   const handleLexio = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Developer mode - use hardcoded data
-    if (developerMode) {
-      handleDeveloperModeConversion();
-      return;
-    }
 
-    // Regular mode - validate URL and scrape
+    // Validate URL input
     if (!url.trim()) {
       setError("Please enter a website URL");
       return;
@@ -145,6 +123,13 @@ export default function App() {
       return;
     }
 
+    // Check if URL matches cached content
+    if (url.trim() === DEVELOPER_MODE_DATA.url) {
+      handleCachedContentLoad();
+      return;
+    }
+
+    // Regular mode - scrape the website
     setLoading(true);
     setError(null);
     setCurrentUrl(url);
@@ -204,27 +189,7 @@ export default function App() {
               />
             </div>
 
-            {/* Toggle Controls */}
-            <div className="space-y-4">
-              {/* Developer Mode Toggle */}
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-neutral-600">developer mode</span>
-                <button
-                  type="button"
-                  onClick={() => setDeveloperMode(!developerMode)}
-                  disabled={isLoading}
-                  className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
-                    developerMode ? 'bg-black' : 'bg-neutral-200'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                      developerMode ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
+
 
             {/* Error Display */}
             {error && (
@@ -236,7 +201,7 @@ export default function App() {
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isLoading || (!developerMode && (!url || !isValidUrl(url)))}
+              disabled={isLoading || !url || !isValidUrl(url)}
               className="w-full px-6 py-3 bg-black text-white font-semibold rounded-lg hover:bg-neutral-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
             >
               {isLoading ? (
@@ -251,40 +216,26 @@ export default function App() {
           </form>
 
           {/* Example Links */}
-          {!developerMode && (
-            <div className="text-center space-y-4">
-              <p className="text-sm text-neutral-500">try these examples:</p>
-              <div className="flex flex-wrap gap-3 justify-center">
-                {[
-                  { url: "https://news.ycombinator.com", label: "news.ycombinator.com" },
-                  { url: "https://www.wikipedia.org", label: "wikipedia.org" },
-                  { url: "https://github.com/trending", label: "github.com/trending" }
-                ].map((example) => (
-                  <button
-                    key={example.url}
-                    onClick={() => setUrl(example.url)}
-                    className="px-4 py-2 text-sm border border-neutral-200 rounded-lg text-neutral-600 hover:text-black hover:border-neutral-300 hover:shadow-sm transition-all duration-200"
-                    disabled={isLoading}
-                  >
-                    {example.label}
-                  </button>
-                ))}
-              </div>
+          <div className="text-center space-y-4">
+            <p className="text-sm text-neutral-500">try these examples:</p>
+            <div className="flex flex-wrap gap-3 justify-center">
+              {[
+                { url: "https://news.ycombinator.com", label: "news.ycombinator.com" },
+                { url: "https://www.wikipedia.org", label: "wikipedia.org" },
+                { url: "https://github.com/trending", label: "github.com/trending" },
+                { url: DEVELOPER_MODE_DATA.url, label: "ap world history" }
+              ].map((example) => (
+                <button
+                  key={example.url}
+                  onClick={() => setUrl(example.url)}
+                  className="px-4 py-2 text-sm border border-neutral-200 rounded-lg text-neutral-600 hover:text-black hover:border-neutral-300 hover:shadow-sm transition-all duration-200"
+                  disabled={isLoading}
+                >
+                  {example.label}
+                </button>
+              ))}
             </div>
-          )}
-          
-          {developerMode && (
-            <div className="text-center">
-              <p className="text-sm text-neutral-500">
-                developer mode enabled - using sample content
-                {process.env.NODE_ENV === 'development' && autoLaunched && (
-                  <span className="block text-xs text-green-600 mt-1">
-                    🚀 auto-launched for development
-                  </span>
-                )}
-              </p>
-            </div>
-          )}
+          </div>
 
         </div>
       </div>

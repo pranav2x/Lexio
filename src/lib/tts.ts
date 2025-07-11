@@ -25,12 +25,89 @@ interface CachedAudio {
 }
 
 /**
+ * Available voice options for selection
+ */
+export interface VoiceOption {
+  id: string;
+  name: string;
+  description: string;
+  gender: 'male' | 'female';
+  accent: string;
+}
+
+export const VOICE_OPTIONS: VoiceOption[] = [
+  {
+    id: 'dj3G1R1ilKoFKhBnWOzG',
+    name: 'Eryn',
+    description: 'Friendly and relatable',
+    gender: 'female',
+    accent: 'American'
+  },
+  {
+    id: 'g6xIsTj2HwM6VR4iXFCw',
+    name: 'Jessica',
+    description: 'Empathetic and expressive',
+    gender: 'female',
+    accent: 'American'
+  },
+  {
+    id: 'OYTbf65OHHFELVut7v2H',
+    name: 'Hope',
+    description: 'Bright and uplifting',
+    gender: 'female',
+    accent: 'American'
+  },
+  {
+    id: 'kdmDKE6EkgrWrrykO9Qt',
+    name: 'Alexandra',
+    description: 'Super realistic, conversational',
+    gender: 'female',
+    accent: 'American'
+  },
+  {
+    id: 'L0Dsvb3SLTyegXwtm47J',
+    name: 'Archer',
+    description: 'Grounded and charming',
+    gender: 'male',
+    accent: 'British'
+  },
+  {
+    id: 'HDA9tsk27wYi3uq0fPcK',
+    name: 'Stuart',
+    description: 'Professional and friendly',
+    gender: 'male',
+    accent: 'Australian'
+  },
+  {
+    id: 'UgBBYS2sOqTuMpoF3BR0',
+    name: 'Mark',
+    description: 'Relaxed and laid back',
+    gender: 'male',
+    accent: 'American'
+  },
+  {
+    id: 'vBKc2FfBKJfcZNyEt1n6',
+    name: 'Finn',
+    description: 'Excellent for podcasts',
+    gender: 'male',
+    accent: 'American'
+  },
+  {
+    id: 'pNInz6obpgDQGcFmaJgB',
+    name: 'Adam',
+    description: 'Classic narration voice',
+    gender: 'male',
+    accent: 'American'
+  }
+];
+
+/**
  * Default TTS configuration
  */
 const DEFAULT_TTS_OPTIONS: Required<TTSOptions> = {
-  voiceId: 'pNInz6obpgDQGcFmaJgB', // Adam voice - good for narration
-  stability: 0.5,
-  similarityBoost: 0.75,
+  voiceId: 'dj3G1R1ilKoFKhBnWOzG', // Eryn - Friendly and relatable female voice
+  stability: 0.4,
+  similarityBoost: 0.8,
   style: 0.0,
   useSpeakerBoost: true,
 };
@@ -288,20 +365,26 @@ function dataURLToBlob(dataURL: string): Blob {
  * Generates speech audio from text using our secure API route
  * @param text - The text to convert to speech
  * @param options - TTS configuration options
+ * @param selectedVoiceId - Optional voice ID to override default (from voice selector)
  * @returns Promise containing audio URL and blob
  * @throws Error if the request fails
  */
 export async function generateSpeech(
   text: string,
-  options: TTSOptions = {}
+  options: TTSOptions = {},
+  selectedVoiceId?: string
 ): Promise<TTSResult> {
   // Validate text
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
     throw new Error('Valid text is required for speech generation');
   }
 
-  // Merge options with defaults
-  const config = { ...DEFAULT_TTS_OPTIONS, ...options };
+  // Merge options with defaults, with voice override if provided
+  const config = { 
+    ...DEFAULT_TTS_OPTIONS, 
+    ...options,
+    ...(selectedVoiceId && { voiceId: selectedVoiceId }),
+  };
 
   // Check development cache first
   if (isDevelopment && typeof window !== 'undefined') {
