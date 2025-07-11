@@ -642,25 +642,24 @@ export default function ReadPage() {
     return () => audioElement.removeEventListener('ended', handleAudioEnd);
   }, [isQueuePlaying, playNextInQueue]);
 
-  // Generate word timing data based on text and audio duration with improved accuracy
+  // Simplified word timing generation optimized for ElevenLabs TTS
   const generateWordTimings = useCallback((text: string, audioDuration: number): WordData[] => {
     const words = text.split(/(\s+)/);
     const nonWhitespaceWords = words.filter(word => word.trim() !== '');
-    const totalWords = nonWhitespaceWords.length;
     
-    // More realistic speech rates: average 150-200 words per minute
-    const estimatedSpeechRate = Math.max(120, Math.min(totalWords / (audioDuration / 60), 200));
-    const baseWordDuration = 60 / estimatedSpeechRate; // seconds per word
+    // Use actual audio duration to calculate precise timing
+    const totalSpeechTime = audioDuration * 0.95; // Account for silence at start/end
+    const averageWordDuration = totalSpeechTime / nonWhitespaceWords.length;
     
-    let currentTime = 0;
+    let currentTime = audioDuration * 0.025; // Small offset for audio start
     const wordTimings: WordData[] = [];
     
     words.forEach((word, index) => {
       const isWhitespace = word.trim() === '';
       
       if (isWhitespace) {
-        // Small pause for whitespace
-        const pauseDuration = word.includes('\n') ? 0.3 : 0.1;
+        // Minimal pause for whitespace
+        const pauseDuration = 0.02;
         wordTimings.push({
           word,
           index,
@@ -670,30 +669,18 @@ export default function ReadPage() {
         });
         currentTime += pauseDuration;
       } else {
-        // Calculate word duration based on various factors
-        let wordDuration = baseWordDuration;
+        // More accurate duration based on word characteristics
+        let wordDuration = averageWordDuration;
         
-        // Adjust for word length (longer words take more time)
-        const wordLength = word.length;
-        if (wordLength > 10) wordDuration *= 1.4;
-        else if (wordLength > 7) wordDuration *= 1.2;
-        else if (wordLength > 4) wordDuration *= 1.1;
-        else if (wordLength <= 2) wordDuration *= 0.8;
+        // Adjust based on word length
+        const baseLength = 5;
+        const lengthFactor = Math.pow(word.length / baseLength, 0.6);
+        wordDuration *= lengthFactor;
         
-        // Adjust for punctuation (pauses after sentences)
-        if (/[.!?]$/.test(word)) wordDuration *= 1.5; // Sentence endings
-        else if (/[,;:]$/.test(word)) wordDuration *= 1.2; // Clause endings
-        
-        // Adjust for complexity (technical terms, numbers, etc.)
-        if (/\d/.test(word)) wordDuration *= 1.25; // Numbers
-        if (/[A-Z]{2,}/.test(word)) wordDuration *= 1.2; // Acronyms
-        if (/^[A-Z][a-z]*$/.test(word)) wordDuration *= 1.05; // Proper nouns
-        
-        // Adjust for common words (spoken faster)
-        const commonWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must'];
-        if (commonWords.includes(word.toLowerCase().replace(/[^\w]/g, ''))) {
-          wordDuration *= 0.85;
-        }
+        // Punctuation adds pause time
+        let pauseAfter = 0;
+        if (/[.!?]$/.test(word)) pauseAfter = averageWordDuration * 0.4;
+        else if (/[,;:]$/.test(word)) pauseAfter = averageWordDuration * 0.2;
         
         wordTimings.push({
           word,
@@ -703,85 +690,58 @@ export default function ReadPage() {
           isWhitespace: false,
         });
         
-        currentTime += wordDuration;
+        currentTime += wordDuration + pauseAfter;
       }
     });
     
-    // Normalize timings to match actual audio duration with precision
+    // Final normalization to exact audio duration
     const totalCalculatedTime = currentTime;
     const scaleFactor = audioDuration / totalCalculatedTime;
     
     wordTimings.forEach(timing => {
       timing.startTime *= scaleFactor;
       timing.endTime *= scaleFactor;
-      
-      // Round to millisecond precision for ultra-accurate sync at all speeds
-      timing.startTime = Math.round(timing.startTime * 1000) / 1000;
-      timing.endTime = Math.round(timing.endTime * 1000) / 1000;
     });
     
     return wordTimings;
   }, []);
 
-  // Ultra-precise word finding with perfect speed synchronization
+  // Speed-optimized word finding with aggressive lookahead for faster speeds
   const findCurrentWordIndex = useCallback((currentTime: number): number => {
     if (wordsData.length === 0 || currentTime < 0) return -1;
     
-    // Use adaptive lookahead based on playback rate for perfect sync
-    // Faster speeds need more aggressive lookahead, slower speeds need less
-    const baseLookaheadMs = 25; // Base lookahead in milliseconds
-    const speedAdjustedLookahead = (baseLookaheadMs * playbackRate) / 1000;
-    const lookaheadTime = currentTime + speedAdjustedLookahead;
+    // More aggressive lookahead for faster speeds to prevent lag
+    const speedLookahead = playbackRate >= 1.5 ? 0.15 : playbackRate >= 1.25 ? 0.1 : 0.05;
+    const lookaheadTime = currentTime + speedLookahead;
     
-    // First pass: Find exact timing match with speed-optimized tolerance
+    // Find word that we're currently in or about to enter
     for (let i = 0; i < wordsData.length; i++) {
       const word = wordsData[i];
       if (!word.isWhitespace) {
-        // Precise timing window that accounts for playback speed
-        const wordStart = word.startTime;
-        const wordEnd = word.endTime;
-        
-        // Check if we're within or approaching the word timing
-        if (currentTime >= wordStart - speedAdjustedLookahead && 
-            lookaheadTime <= wordEnd + speedAdjustedLookahead) {
+        // Check if lookahead time is within this word's timing
+        if (lookaheadTime >= word.startTime && lookaheadTime <= word.endTime) {
+          return i;
+        }
+        // Or if current time is within word (fallback)
+        if (currentTime >= word.startTime && currentTime <= word.endTime) {
           return i;
         }
       }
     }
     
-    // Second pass: Find closest word with ultra-precise distance calculation
-    let bestIndex = -1;
-    let smallestDistance = Infinity;
-    
+    // If no exact match, find closest upcoming word
     for (let i = 0; i < wordsData.length; i++) {
       const word = wordsData[i];
-      if (!word.isWhitespace) {
-        const wordStart = word.startTime;
-        const wordEnd = word.endTime;
-        const wordMidpoint = (wordStart + wordEnd) / 2;
-        
-        let distance;
-        
-        if (currentTime < wordStart) {
-          // Upcoming word - distance to start, scaled by speed for responsiveness
-          distance = (wordStart - currentTime) / playbackRate;
-        } else if (currentTime > wordEnd) {
-          // Past word - distance from end, heavily penalized
-          distance = (currentTime - wordEnd) * 2 * playbackRate;
-        } else {
-          // We're within the word - calculate position-based priority
-          // Prefer words we're closer to the center of
-          distance = Math.abs(currentTime - wordMidpoint) * 0.05;
+      if (!word.isWhitespace && word.startTime > currentTime) {
+        // If the next word is very close, highlight it
+        if (word.startTime - currentTime < speedLookahead * 1.5) {
+          return i;
         }
-        
-        if (distance < smallestDistance) {
-          smallestDistance = distance;
-          bestIndex = i;
-        }
+        break;
       }
     }
     
-    return bestIndex;
+    return -1;
   }, [wordsData, playbackRate]);
 
   // Auto-scroll to current word with improved performance
@@ -859,41 +819,33 @@ export default function ReadPage() {
     }
   }, [scrapedData]);
 
-  // Ultra-responsive word index updates with speed-optimized precision
+  // High-frequency word index updates for accurate sync at all speeds
   useEffect(() => {
     if (isPlaying && wordsData.length > 0 && currentTime >= 0 && !isNaN(currentTime)) {
       
-      // Calculate optimal update frequency based on playback speed
-      // Faster speeds need more frequent updates for perfect sync
-      const baseUpdateFrequency = 16; // ~60fps base
-      const speedOptimizedFrequency = Math.max(8, baseUpdateFrequency / playbackRate);
+      // Higher update frequency for better sync, especially at fast speeds
+      const updateFrequency = playbackRate >= 1.5 ? 8 : 12; // Higher frequency for faster speeds
       
       let animationId: number;
       let lastUpdateTime = 0;
       
       const updateWordIndex = (timestamp: number) => {
-        // Throttle updates based on speed-optimized frequency
-        if (timestamp - lastUpdateTime >= speedOptimizedFrequency) {
+        if (timestamp - lastUpdateTime >= updateFrequency) {
           const newWordIndex = findCurrentWordIndex(currentTime);
           
-          // Update immediately if we have a valid new index
-          if (newWordIndex !== currentWordIndex && 
-              newWordIndex !== -1 && 
-              newWordIndex < wordsData.length &&
-              !wordsData[newWordIndex]?.isWhitespace) {
+          // Update immediately for any valid change
+          if (newWordIndex !== currentWordIndex && newWordIndex !== -1) {
             setCurrentWordIndex(newWordIndex);
           }
           
           lastUpdateTime = timestamp;
         }
         
-        // Continue the animation loop for continuous updates
         if (isPlaying) {
           animationId = requestAnimationFrame(updateWordIndex);
         }
       };
       
-      // Start the precision update loop
       animationId = requestAnimationFrame(updateWordIndex);
       
       return () => {
