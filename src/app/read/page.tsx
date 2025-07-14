@@ -6,6 +6,7 @@ import { useLexioState, useLexioActions } from "@/lib/store";
 import { extractSummary } from "@/lib/firecrawl";
 import { generateSpeech, cleanupAudioUrl, estimateTextDuration, clearTTSCache, getTTSCacheStats } from "@/lib/tts";
 import VoiceSelector from "@/components/VoiceSelector";
+import SmartChat from "@/components/SmartChat";
 
 interface WordData {
   word: string;
@@ -62,10 +63,33 @@ export default function ReadPage() {
   const [controlsShuffle, setControlsShuffle] = useState(false);
   const [controlsRepeat, setControlsRepeat] = useState(false);
   
+  // Animation state for cards
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [hasAnimated, setHasAnimated] = useState(false);
+  
   // Refs
   const audioRef = useRef<HTMLAudioElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const highlightedWordRef = useRef<HTMLSpanElement>(null);
+
+  // Handle initial card animations
+  useEffect(() => {
+    if (scrapedData && !hasAnimated) {
+      // Set animating state immediately
+      setIsAnimating(true);
+      
+      // Small delay to ensure initial state is rendered first
+      const timer = setTimeout(() => {
+        setHasAnimated(true);
+        // Stop animation state after all cards have animated
+        setTimeout(() => {
+          setIsAnimating(false);
+        }, 2200); // Allow time for all staggered animations to complete
+      }, 150); // Slightly longer delay for more dramatic effect
+      
+      return () => clearTimeout(timer);
+    }
+  }, [scrapedData, hasAnimated]);
 
   // Sync control progress with actual audio playback (debounced)
   useEffect(() => {
@@ -425,6 +449,34 @@ export default function ReadPage() {
       title: 'Summary',
       content: summaryContent
     });
+  };
+
+  // Smart chat handlers
+  const handleSmartAddToQueue = (sectionIndices: number[], explanation: string) => {
+    if (!scrapedData) return;
+    console.log(`🤖 Smart AI adding sections: ${sectionIndices.join(', ')} - ${explanation}`);
+    sectionIndices.forEach(index => {
+      if (index < scrapedData.sections.length) {
+        handleAddSectionToQueue(index);
+      }
+    });
+  };
+
+  const handleSmartAddSummary = () => {
+    console.log('🤖 Smart AI adding summary');
+    handleAddSummaryToQueue();
+  };
+
+  // Get available sections for the chat component
+  const getAvailableSectionsForChat = () => {
+    if (!scrapedData) return [];
+    return scrapedData.sections
+      .map((section, index) => ({
+        title: section.title,
+        content: section.content,
+        index: index
+      }))
+      .filter((_, index) => !isInQueue(`section-${index}`));
   };
 
   // Ultra-smooth queue playback with reliable loading completion
@@ -1103,6 +1155,126 @@ export default function ReadPage() {
           -webkit-box-orient: vertical;
           overflow: hidden;
         }
+        
+        /* Card entrance animations - BEAUTIFUL & CLEAN */
+        .card-animate-enter {
+          opacity: 0;
+          transform: translateY(60px) scale(0.92) rotateX(8deg);
+          filter: blur(4px);
+          box-shadow: 0 0 0 rgba(255, 255, 255, 0);
+          transition: all 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+          will-change: transform, opacity, filter, box-shadow;
+        }
+        
+        .card-animate-enter.animate-visible {
+          opacity: 1;
+          transform: translateY(0) scale(1) rotateX(0deg);
+          filter: blur(0px);
+          box-shadow: 0 20px 60px rgba(255, 255, 255, 0.15);
+        }
+        
+        /* Elegant staggered animation delays */
+        .card-animate-delay-0 { transition-delay: 150ms; }
+        .card-animate-delay-1 { transition-delay: 300ms; }
+        .card-animate-delay-2 { transition-delay: 450ms; }
+        .card-animate-delay-3 { transition-delay: 600ms; }
+        .card-animate-delay-4 { transition-delay: 750ms; }
+        .card-animate-delay-5 { transition-delay: 900ms; }
+        
+        /* Beautiful shimmer effect during entrance */
+        .card-animate-enter::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: -100%;
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(
+            90deg,
+            transparent,
+            rgba(255, 255, 255, 0.4),
+            transparent
+          );
+          transition: left 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+          z-index: 1;
+          border-radius: inherit;
+        }
+        
+        .card-animate-enter.animate-visible::before {
+          left: 100%;
+        }
+        
+        /* Smooth hover effect */
+        .card-animate-enter:hover {
+          transform: translateY(-4px) scale(1.02) rotateX(-2deg);
+          box-shadow: 0 25px 70px rgba(255, 255, 255, 0.25);
+          filter: brightness(1.05);
+          transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        
+        /* Gentle floating animation after entrance */
+        .card-animate-enter.animate-visible {
+          animation: gentle-float 6s ease-in-out infinite 2s;
+        }
+        
+        @keyframes gentle-float {
+          0%, 100% {
+            transform: translateY(0) scale(1) rotateX(0deg);
+            box-shadow: 0 20px 60px rgba(255, 255, 255, 0.15);
+          }
+          50% {
+            transform: translateY(-3px) scale(1.005) rotateX(0.5deg);
+            box-shadow: 0 25px 70px rgba(255, 255, 255, 0.2);
+          }
+        }
+        
+        /* Ensure cards are visible once animation completes */
+        .glass-card {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+          position: relative;
+          overflow: hidden;
+        }
+        
+        /* Beautiful content emergence */
+        .content-container {
+          animation: content-emerge 1.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        
+        @keyframes content-emerge {
+          0% {
+            opacity: 0;
+            transform: translateY(30px);
+            filter: blur(2px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+            filter: blur(0px);
+          }
+        }
+        
+        /* Sparkle animation */
+        @keyframes sparkle {
+          0% {
+            opacity: 0;
+            transform: scale(0) translateY(10px);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1) translateY(-5px);
+          }
+          100% {
+            opacity: 0;
+            transform: scale(0.5) translateY(-15px);
+          }
+        }
+        
+
+        
+
+        
+
       `}</style>
       {/* Hidden Audio Element */}
       {audioUrl && (
@@ -1214,7 +1386,9 @@ export default function ReadPage() {
       {/* Main Content */}
       <main ref={contentRef} className="min-h-screen">
         {/* Container with proper margins */}
-        <div className="max-w-[1800px] mx-auto px-8 lg:px-12 py-12">
+        <div className={`max-w-[1800px] mx-auto px-8 lg:px-12 py-12 ${
+          !hasAnimated ? 'content-container' : ''
+        }`}>
           
           {/* Article Header - Full Width */}
           <div className="mb-16">
@@ -1277,24 +1451,24 @@ export default function ReadPage() {
             </div>
           </div>
 
-          {/* Main 3-Column Layout Grid */}
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 xl:gap-12 items-start">
+          {/* Main Layout Grid - Responsive Desktop/Mobile Layout */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 xl:gap-10 items-start">
             
-            {/* Content Cards Section - Takes up 7/12 columns */}
-            <div className="xl:col-span-7">
+            {/* Content Cards Section - Takes up 8/12 columns */}
+            <div className="xl:col-span-8">
               {/* Check if all content is in queue */}
               {getAvailableSections().length === 0 && !isSummaryAvailable() && scrapedData.sections.length <= 5 ? (
-                <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
-                  <div className="text-6xl mb-6">🎧</div>
-                  <h3 className="text-xl font-bold text-white mb-3 font-mono-enhanced">All Content in Queue!</h3>
-                  <p className="text-white/70 font-mono-enhanced">
+                <div className="flex flex-col items-center justify-center min-h-[300px] text-center">
+                  <div className="text-5xl mb-4">🎧</div>
+                  <h3 className="text-lg font-bold text-white mb-2 font-mono-enhanced">All Content in Queue!</h3>
+                  <p className="text-sm text-white/70 font-mono-enhanced">
                     All sections are now in your listening queue. Remove items from the queue to see them here again.
                   </p>
                 </div>
               ) : (
                 <>
-                  {/* Cards Grid - 2 columns of cards */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+                  {/* Responsive Cards Grid - 1 column mobile, 2 medium, 3 large */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
                 
                 {/* Section Cards - Only show sections not in queue */}
                 {scrapedData.sections.slice(0, 5).map((section, index) => {
@@ -1304,37 +1478,48 @@ export default function ReadPage() {
                   return (
                   <div 
                     key={index}
-                    className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
+                    className={`w-full glass-card rounded-xl p-4 flex flex-col neon-glow h-40 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] ${
                       currentPlayingSection === `section-${index}` 
-                        ? 'border-white/40 bg-white/8 animate-pulse' 
+                        ? 'border-white/40 bg-white/8 animate-pulse shadow-white/20' 
+                        : 'hover:bg-white/5'
+                    } ${
+                      isAnimating || !hasAnimated 
+                        ? `card-animate-enter card-animate-delay-${index} ${hasAnimated ? 'animate-visible' : ''}` 
                         : ''
                     }`}
                   >
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className={`w-3 h-3 rounded-full flex-shrink-0 shadow-lg ${
+                    {/* Subtle sparkle effect during entrance */}
+                    {(isAnimating || !hasAnimated) && (
+                      <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl">
+                        {[...Array(3)].map((_, i) => (
+                          <div
+                            key={i}
+                            className="absolute w-1 h-1 bg-white rounded-full opacity-70"
+                            style={{
+                              left: `${20 + Math.random() * 60}%`,
+                              top: `${20 + Math.random() * 60}%`,
+                              animationDelay: `${index * 150 + i * 200}ms`,
+                              animation: 'sparkle 1.5s ease-out forwards'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 shadow-md ${
                         index % 3 === 0 ? 'bg-gradient-to-r from-white/90 to-white/60' : 
                         index % 3 === 1 ? 'bg-gradient-to-r from-white/80 to-white/50' : 'bg-gradient-to-r from-white/85 to-white/55'
                       }`}></div>
-                      <h3 className="text-sm font-semibold text-white truncate font-mono-enhanced">
+                      <h3 className="text-xs font-semibold text-white truncate font-mono-enhanced">
                         {section.title}
                       </h3>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <button
-                        onClick={() => handleAddSectionToQueue(index)}
-                        className="btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce hover:bg-white/20 active:bg-white/30"
-                        title={`Add "${section.title}" to listening queue`}
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                        </svg>
-                      </button>
-                    </div>
+
                   </div>
                   <div className="flex-1 overflow-hidden">
-                    <p className="text-base text-white/80 leading-[1.5] font-mono-enhanced line-clamp-3">
-                      {section.content.length > 150 ? section.content.substring(0, 150) + '...' : section.content}
+                    <p className="text-sm text-white/80 leading-[1.4] font-mono-enhanced line-clamp-4">
+                      {section.content.length > 120 ? section.content.substring(0, 120) + '...' : section.content}
                     </p>
                   </div>
                 </div>
@@ -1347,14 +1532,18 @@ export default function ReadPage() {
 
                 {/* Additional Sections (if more than 5) */}
                 {scrapedData.sections.length > 5 && (
-                  <div className="w-full glass-card rounded-xl p-6 h-48 flex flex-col justify-center items-center text-center neon-glow micro-bounce">
-                    <div className="w-12 h-12 glass-card rounded-full flex items-center justify-center mb-4 neon-glow">
-                      <svg className="w-6 h-6 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className={`w-full glass-card rounded-xl p-4 h-40 flex flex-col justify-center items-center text-center neon-glow micro-bounce shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] hover:bg-white/5 ${
+                    isAnimating || !hasAnimated 
+                      ? `card-animate-enter card-animate-delay-5 ${hasAnimated ? 'animate-visible' : ''}` 
+                      : ''
+                  }`}>
+                    <div className="w-10 h-10 glass-card rounded-full flex items-center justify-center mb-3 neon-glow">
+                      <svg className="w-5 h-5 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                       </svg>
                     </div>
-                    <h3 className="text-sm font-semibold text-white mb-3 font-mono-enhanced">More Sections</h3>
-                    <p className="text-sm text-white/70 font-mono-enhanced">
+                    <h3 className="text-xs font-semibold text-white mb-2 font-mono-enhanced">More Sections</h3>
+                    <p className="text-xs text-white/70 font-mono-enhanced">
                       +{scrapedData.sections.length - 5} additional sections available
                     </p>
                   </div>
@@ -1363,30 +1552,41 @@ export default function ReadPage() {
                 {/* Summary Card - Only show if not in queue */}
                 {scrapedData.text && isSummaryAvailable() && (
                   <div 
-                    className={`w-full glass-card rounded-xl p-6 flex flex-col neon-glow h-48 ${
+                    className={`w-full glass-card rounded-xl p-4 flex flex-col neon-glow h-40 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] ${
                       currentPlayingSection === 'summary' 
-                        ? 'border-white/40 bg-white/8 animate-pulse' 
+                        ? 'border-white/40 bg-white/8 animate-pulse shadow-white/20' 
+                        : 'hover:bg-white/5'
+                    } ${
+                      isAnimating || !hasAnimated 
+                        ? `card-animate-enter card-animate-delay-${scrapedData.sections.slice(0, 5).filter((_, i) => !isInQueue(`section-${i}`)).length} ${hasAnimated ? 'animate-visible' : ''}` 
                         : ''
                     }`}>
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-3 h-3 bg-gradient-to-r from-white/90 to-white/60 rounded-full shadow-lg"></div>
-                                                  <h3 className="text-sm font-semibold text-white font-mono-enhanced">Summary</h3>
+                    {/* Subtle sparkle effect during entrance */}
+                    {(isAnimating || !hasAnimated) && (
+                      <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl">
+                        {[...Array(4)].map((_, i) => (
+                          <div
+                            key={i}
+                            className="absolute w-1 h-1 bg-white rounded-full opacity-70"
+                            style={{
+                              left: `${15 + Math.random() * 70}%`,
+                              top: `${15 + Math.random() * 70}%`,
+                              animationDelay: `${scrapedData.sections.slice(0, 5).filter((_, j) => !isInQueue(`section-${j}`)).length * 150 + i * 200}ms`,
+                              animation: 'sparkle 1.5s ease-out forwards'
+                            }}
+                          />
+                        ))}
                       </div>
+                    )}
+                    <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <button
-                          onClick={handleAddSummaryToQueue}
-                          className="btn-premium relative p-2 rounded-lg transition-all duration-300 hover:scale-110 micro-bounce hover:bg-white/20 active:bg-white/30"
-                          title="Add summary to listening queue"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                          </svg>
-                        </button>
+                        <div className="w-2.5 h-2.5 bg-gradient-to-r from-white/90 to-white/60 rounded-full shadow-md"></div>
+                        <h3 className="text-xs font-semibold text-white font-mono-enhanced">Summary</h3>
                       </div>
+
                     </div>
                     <div className="flex-1 overflow-hidden">
-                      <p className="text-base text-white/80 leading-[1.5] font-mono-enhanced line-clamp-3">
+                      <p className="text-sm text-white/80 leading-[1.4] font-mono-enhanced line-clamp-4">
                         {extractSummary(scrapedData.text, 120)}
                       </p>
                     </div>
@@ -1397,16 +1597,28 @@ export default function ReadPage() {
               )}
             </div>
 
-            {/* Listening Queue - Takes up 5/12 columns */}
-            <div className="xl:col-span-5">
-              <div className="xl:sticky xl:top-24">
-                <div className="w-full min-h-[600px] lg:min-h-[700px] xl:min-h-[737px] queue-zone-enhanced rounded-xl p-4 gpu-accelerated flex flex-col overflow-hidden">
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-headline text-gradient font-mono-enhanced">🎧 Listening Queue</h3>
+            {/* Smart Chat & Listening Queue - Takes up 4/12 columns */}
+            <div className="xl:col-span-4">
+              <div className="xl:sticky xl:top-20 space-y-5">
+                
+                {/* Smart Chat Interface */}
+                <div className="w-full queue-zone-enhanced rounded-xl p-3 gpu-accelerated shadow-lg">
+                  <SmartChat
+                    availableSections={getAvailableSectionsForChat()}
+                    onAddToQueue={handleSmartAddToQueue}
+                    onAddSummary={handleSmartAddSummary}
+                    isProcessing={false}
+                  />
+                </div>
+
+                {/* Listening Queue */}
+                <div className="w-full min-h-[350px] lg:min-h-[450px] xl:min-h-[450px] queue-zone-enhanced rounded-xl p-4 gpu-accelerated flex flex-col overflow-hidden shadow-lg">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg text-gradient font-mono-enhanced">🎧 Listening Queue</h3>
                     {listeningQueue.length > 0 && (
                       <button
                         onClick={clearQueue}
-                        className="text-sm text-white/50 hover:text-red-400 transition-all duration-300 btn-premium px-3 py-1 rounded font-mono-enhanced"
+                        className="text-xs text-white/50 hover:text-red-400 transition-all duration-300 btn-premium px-2 py-1 rounded font-mono-enhanced"
                       >
                         Clear
                       </button>
@@ -1415,20 +1627,20 @@ export default function ReadPage() {
 
                   {listeningQueue.length === 0 ? (
                     <div className="flex flex-col items-center justify-center flex-1 text-sm transition-all duration-500 text-white/60">
-                      <div className="text-5xl mb-6">📥</div>
-                      <div className="text-lg font-semibold mb-3 text-center font-mono-enhanced text-gradient">Your Listening Queue</div>
-                      <div className="text-sm text-white/50 text-center px-6 font-mono-enhanced leading-relaxed">Use the + buttons on content cards to add them to your queue</div>
+                      <div className="text-4xl mb-4">📥</div>
+                      <div className="text-base font-semibold mb-2 text-center font-mono-enhanced text-gradient">Your Listening Queue</div>
+                      <div className="text-xs text-white/50 text-center px-4 font-mono-enhanced leading-relaxed">Use the Smart Learning Assistant above to tell me what you want to learn!</div>
                     </div>
                   ) : (
                     <>
                       {/* Currently Playing Item - Compact */}
                       {currentQueueIndex !== -1 && isQueuePlaying && listeningQueue[currentQueueIndex] && (
-                        <div className="mb-6 glass-card rounded-xl p-4 shadow-lg shadow-white/20 border-2 border-white/30">
-                          <div className="flex items-center gap-2 mb-3">
-                            <div className="w-3 h-3 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
-                            <span className="text-sm font-semibold font-mono-enhanced text-gradient">Now Playing</span>
+                        <div className="mb-4 glass-card rounded-xl p-3 shadow-lg shadow-white/20 border-2 border-white/30">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2.5 h-2.5 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
+                            <span className="text-xs font-semibold font-mono-enhanced text-gradient">Now Playing</span>
                           </div>
-                          <h3 className="text-lg font-bold text-white mb-4 font-mono-enhanced truncate">
+                          <h3 className="text-sm font-bold text-white mb-3 font-mono-enhanced truncate">
                             {listeningQueue[currentQueueIndex].title}
                           </h3>
                           
@@ -1487,30 +1699,30 @@ export default function ReadPage() {
                       )}
 
                       {/* Queue List */}
-                      <div className="flex-1 space-y-3 mb-8 overflow-y-auto overflow-x-hidden px-2 py-1">
-                        <h4 className="text-lg font-semibold text-white/70 mb-4 font-mono-enhanced">Queue ({listeningQueue.length} items)</h4>
+                      <div className="flex-1 space-y-2 mb-6 overflow-y-auto overflow-x-hidden px-1 py-1">
+                        <h4 className="text-sm font-semibold text-white/70 mb-3 font-mono-enhanced">Queue ({listeningQueue.length} items)</h4>
                         {listeningQueue.map((item, index) => (
                           <div
                             key={item.id}
-                            className={`glass-card p-4 rounded-xl text-sm transition-all duration-300 flex items-start justify-between ${
+                            className={`glass-card p-3 rounded-xl text-sm transition-all duration-300 flex items-start justify-between shadow-md hover:shadow-lg ${
                               currentQueueIndex === index && isQueuePlaying
                                 ? 'bg-white/10 text-white border border-white/40 shadow-lg shadow-white/10'
                                 : 'text-white/80 hover:bg-white/5 hover:border-white/20'
                             }`}
                           >
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-2">
+                              <div className="flex items-center gap-2 mb-1">
                                 <span className="text-xs text-white/50 font-mono-enhanced">#{index + 1}</span>
                                 {currentQueueIndex === index && isQueuePlaying && (
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
+                                  <div className="flex items-center gap-1">
+                                    <div className="w-1.5 h-1.5 bg-white/90 rounded-full animate-pulse"></div>
                                     <span className="text-xs text-white/90 font-medium font-mono-enhanced">Playing</span>
                                   </div>
                                 )}
                               </div>
-                              <div className="font-semibold text-sm truncate mb-2 font-mono-enhanced">{item.title}</div>
-                              <div className="text-sm text-white/60 leading-relaxed font-mono-enhanced">
-                                {item.content.slice(0, 80)}...
+                              <div className="font-semibold text-xs truncate mb-1 font-mono-enhanced">{item.title}</div>
+                              <div className="text-xs text-white/60 leading-relaxed font-mono-enhanced">
+                                {item.content.slice(0, 70)}...
                               </div>
                             </div>
                             <button
