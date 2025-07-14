@@ -23,13 +23,15 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
   isProcessing = false
 }) => {
   return (
-    <div className="w-full queue-zone-enhanced rounded-xl p-3 gpu-accelerated shadow-lg">
-      <SmartChat
-        availableSections={availableSections}
-        onAddToQueue={onAddToQueue}
-        onAddSummary={onAddSummary}
-        isProcessing={isProcessing}
-      />
+    <div className="w-full h-full queue-zone-enhanced rounded-xl p-3 gpu-accelerated shadow-lg flex flex-col">
+      <div className="flex-1">
+        <SmartChat
+          availableSections={availableSections}
+          onAddToQueue={onAddToQueue}
+          onAddSummary={onAddSummary}
+          isProcessing={isProcessing}
+        />
+      </div>
     </div>
   );
 };

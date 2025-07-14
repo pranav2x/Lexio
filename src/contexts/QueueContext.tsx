@@ -179,17 +179,20 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     
     console.log('🚀 Queue: Starting playback for:', firstItem.title);
     
-    const estimatedDuration = estimateTextDuration(firstItem.content);
-    const timings = generateWordTimings(firstItem.content, estimatedDuration);
-    
-    setIsPreloading(true);
+    // Set basic state and content immediately for instant display
     setIsQueuePlaying(true);
     setCurrentQueueIndex(0);
-    setIsMaximized(true);
     setCurrentPlayingText(firstItem.content);
     setCurrentPlayingSection(firstItem.id as any);
     setCurrentWordIndex(-1);
-    setWordsData(timings);
+    
+    // Generate initial timings with estimated duration for immediate display
+    const estimatedDuration = estimateTextDuration(firstItem.content);
+    const initialTimings = generateWordTimings(firstItem.content, estimatedDuration);
+    setWordsData(initialTimings);
+    
+    // Since maximization is handled by handleControlsPlayPause, just clear preloading
+    setIsPreloading(false);
     
     try {
       const result = await generateSpeech(firstItem.content, {}, selectedVoiceId);
@@ -199,9 +202,34 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
         // Update cache stats
       }
       
-      setIsPreloading(false);
-      
+      // Load and prepare audio in the background
       if (audioRef.current) {
+        audioRef.current.load();
+        
+        const waitForAudioReady = () => {
+          return new Promise<void>((resolve) => {
+            const checkReady = () => {
+              if (audioRef.current && audioRef.current.readyState >= 2) {
+                // Update word timings with actual duration
+                const actualDuration = audioRef.current.duration;
+                if (actualDuration && actualDuration > 0) {
+                  const actualTimings = generateWordTimings(firstItem.content, actualDuration);
+                  setWordsData(actualTimings);
+                  console.log('📝 Queue: Updated word timings with actual duration:', actualDuration);
+                }
+                resolve();
+              } else {
+                setTimeout(checkReady, 50);
+              }
+            };
+            checkReady();
+          });
+        };
+        
+        await waitForAudioReady();
+        
+        console.log('📺 Queue: Audio ready, starting playback');
+        
         try {
           await audioRef.current.play();
           setControlsPlaying(true);
@@ -215,7 +243,6 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       console.error('❌ Queue: Error during playback setup:', error);
       setIsQueuePlaying(false);
       setCurrentQueueIndex(-1);
-      setIsMaximized(false);
       setIsPreloading(false);
     }
   }, [listeningQueue, estimateTextDuration, generateWordTimings, setIsPreloading, setIsQueuePlaying, setIsMaximized, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, selectedVoiceId, audioRef]);
@@ -250,6 +277,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     const timings = generateWordTimings(nextItem.content, estimatedDuration);
     
     setCurrentQueueIndex(nextIndex);
+    setIsMaximized(true); // Ensure maximization stays active during queue transitions
     setCurrentPlayingText(nextItem.content);
     setCurrentPlayingSection(nextItem.id as any);
     setCurrentWordIndex(-1);
@@ -290,16 +318,41 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
 
   // Enhanced queue control functions
   const handleControlsPlayPause = useCallback(() => {
-    if (listeningQueue.length > 0 && !audioUrl && !isQueuePlaying) {
+    console.log('🎮 Controls: Play button clicked', {
+      queueLength: listeningQueue.length,
+      hasAudioUrl: !!audioUrl,
+      isQueuePlaying,
+      isPlaying,
+      currentQueueIndex
+    });
+
+    // Priority 1: Start queue playback if queue has items and not currently playing
+    if (listeningQueue.length > 0 && !isQueuePlaying) {
+      console.log('🎮 Controls: Starting queue playback and immediately maximizing');
+      // Clear any residual audio first
+      if (audioUrl) {
+        clearAudio();
+      }
+      // Immediately maximize the player when starting queue
+      setIsMaximized(true);
       playQueue();
       return;
     }
 
+    // Priority 2: Handle queue playback controls
     if (isQueuePlaying && audioRef.current) {
+      // Ensure maximization when resuming queue playback
+      if (!isPlaying) {
+        console.log('🎮 Controls: Resuming queue playback and maximizing');
+        setIsMaximized(true);
+      }
+      
       try {
         if (isPlaying) {
+          console.log('🎮 Controls: Pausing queue playback');
           audioRef.current.pause();
         } else {
+          console.log('🎮 Controls: Playing queue audio');
           audioRef.current.play();
         }
       } catch (error) {
@@ -308,6 +361,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       return;
     }
 
+    // Priority 3: Handle individual audio playback
     if (audioRef.current && audioUrl) {
       try {
         if (isPlaying) {
@@ -319,7 +373,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
         console.debug('Audio control action skipped:', error);
       }
     }
-  }, [listeningQueue.length, audioUrl, isQueuePlaying, audioRef, isPlaying, playQueue]);
+  }, [listeningQueue.length, audioUrl, isQueuePlaying, audioRef, isPlaying, playQueue, setIsMaximized, clearAudio, currentQueueIndex]);
 
   const handleControlsPrevious = useCallback(async () => {
     if (!isQueuePlaying || currentQueueIndex <= 0) return;
@@ -330,6 +384,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     const timings = generateWordTimings(prevItem.content, estimatedDuration);
     
     setCurrentQueueIndex(prevIndex);
+    setIsMaximized(true); // Maintain maximization during manual navigation
     setCurrentPlayingText(prevItem.content);
     setCurrentPlayingSection(prevItem.id as any);
     setCurrentWordIndex(-1);
@@ -372,6 +427,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     const timings = generateWordTimings(nextItem.content, estimatedDuration);
     
     setCurrentQueueIndex(nextIndex);
+    setIsMaximized(true); // Maintain maximization during manual navigation
     setCurrentPlayingText(nextItem.content);
     setCurrentPlayingSection(nextItem.id as any);
     setCurrentWordIndex(-1);

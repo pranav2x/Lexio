@@ -100,8 +100,11 @@ const ContentCard: React.FC<ContentCardProps> = ({
               style={{
                 left: `${15 + Math.random() * 70}%`,
                 top: `${15 + Math.random() * 70}%`,
-                animationDelay: `${index * 150 + i * 200}ms`,
-                animation: 'sparkle 1.5s ease-out forwards'
+                animationName: 'sparkle',
+                animationDuration: '1.5s',
+                animationTimingFunction: 'ease-out',
+                animationFillMode: 'forwards',
+                animationDelay: `${index * 150 + i * 200}ms`
               }}
             />
           ))}

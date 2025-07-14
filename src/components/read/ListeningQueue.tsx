@@ -27,7 +27,7 @@ const ListeningQueue: React.FC = () => {
   const highlightedWordRef = useRef<HTMLSpanElement>(null);
 
   return (
-    <div className="w-full min-h-[350px] lg:min-h-[450px] xl:min-h-[450px] queue-zone-enhanced rounded-xl p-4 gpu-accelerated flex flex-col overflow-hidden shadow-lg">
+    <div className="w-full h-full queue-zone-enhanced rounded-xl p-4 gpu-accelerated flex flex-col overflow-hidden shadow-lg">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg text-gradient font-mono-enhanced">🎧 Listening Queue</h3>
         {listeningQueue.length > 0 && (

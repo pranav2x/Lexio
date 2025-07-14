@@ -18,7 +18,7 @@ import ListeningQueue from "@/components/read/ListeningQueue";
 import AudioPlayer from "@/components/read/AudioPlayer";
 import MaximizedPlayer from "@/components/read/MaximizedPlayer";
 
-// Hooks
+// HooksHooks
 import { useQueue } from "@/contexts/QueueContext";
 import { useAudio } from "@/contexts/AudioContext";
 
@@ -157,7 +157,7 @@ const ReadPageContent: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen text-white">
+    <div className="h-screen text-white overflow-hidden flex flex-col">
       <style jsx>{`
         .line-clamp-3 {
           display: -webkit-box;
@@ -288,157 +288,199 @@ const ReadPageContent: React.FC = () => {
         onStartOver={handleStartOver}
       />
 
-      {/* Main Content */}
-      <main className="min-h-screen">
-        {/* Container with proper margins */}
-        <div className={`max-w-[1800px] mx-auto px-8 lg:px-12 py-12 ${
+      {/* Main Content - Full Viewport */}
+      <main className="flex-1 flex flex-col min-h-0">
+        {/* Compact Header */}
+        <div className={`flex-shrink-0 px-3 lg:px-4 py-2 border-b border-white/10 bg-black/10 backdrop-blur-sm ${
           !hasAnimated ? 'content-container' : ''
         }`}>
-          
-          {/* Article Header - Full Width */}
-          <div className="mb-16">
-            <div className="max-w-5xl">
-              <h1 className="text-display text-gradient mb-8 leading-tight">
-                {scrapedData.title}
-              </h1>
-            
-              {currentUrl && (
-                <div className="flex items-center gap-3 text-sm text-white/60 mb-8 group hover:text-white/80 transition-colors duration-300">
-                  <svg className="w-4 h-4 group-hover:scale-110 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                  </svg>
-                  <a 
-                    href={currentUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="font-mono-enhanced hover:text-white neon-glow transition-all duration-300"
-                  >
-                    {currentUrl}
-                  </a>
-                </div>
-              )}
+          <div className="max-w-none">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+              {/* Title and URL */}
+              <div className="flex-1 min-w-0">
+                <h1 className="text-base lg:text-lg text-gradient font-bold truncate mb-1">
+                  {scrapedData.title}
+                </h1>
+                {currentUrl && (
+                  <div className="flex items-center gap-2 text-xs text-white/60 group hover:text-white/80 transition-colors">
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    <a 
+                      href={currentUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="font-mono-enhanced hover:text-white neon-glow transition-all duration-300 truncate"
+                    >
+                      {currentUrl}
+                    </a>
+                  </div>
+                )}
+              </div>
 
-              {/* Content Stats */}
-              <div className="flex flex-wrap gap-8 text-sm text-white/70 mb-8">
-                <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
-                  <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {/* Stats */}
+              <div className="flex flex-wrap gap-2 text-xs text-white/70">
+                <div className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded">
+                  <svg className="w-3 h-3 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  <span className="font-mono-enhanced">{scrapedData.text.split(' ').length.toLocaleString()} words</span>
-                  {scrapedData.cleanText && scrapedData.cleanText !== scrapedData.text && (
-                    <span className="text-white/60 text-xs font-mono-enhanced">
-                      ({scrapedData.cleanText.split(' ').length.toLocaleString()} optimized)
-                    </span>
-                  )}
+                  <span>{scrapedData.text.split(' ').length.toLocaleString()}</span>
                 </div>
-                <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
-                  <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded">
+                  <svg className="w-3 h-3 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <span className="font-mono-enhanced">~{Math.ceil(scrapedData.text.split(' ').length / 200)} min read</span>
+                  <span>~{Math.ceil(scrapedData.text.split(' ').length / 200)}m</span>
                 </div>
-                <div className="flex items-center gap-3 micro-bounce glass-card px-4 py-2 rounded-lg">
-                  <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded">
+                  <svg className="w-3 h-3 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
                   </svg>
-                  <span className="font-mono-enhanced">~{Math.ceil(estimateTextDuration(scrapedData.text) / 60)} min listen</span>
+                  <span>~{Math.ceil(estimateTextDuration(scrapedData.text) / 60)}m</span>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Main Layout Grid - Responsive Desktop/Mobile Layout */}
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 xl:gap-10 items-start">
-            
-            {/* Content Cards Section - Takes up 8/12 columns */}
-            <div className="xl:col-span-8">
-              {/* Check if all content is in queue */}
-              {getAvailableSections().length === 0 && !isSummaryAvailable() && scrapedData.sections.length <= 5 ? (
-                <div className="flex flex-col items-center justify-center min-h-[300px] text-center">
-                  <div className="text-5xl mb-4">🎧</div>
-                  <h3 className="text-lg font-bold text-white mb-2 font-mono-enhanced">All Content in Queue!</h3>
-                  <p className="text-sm text-white/70 font-mono-enhanced">
-                    All sections are now in your listening queue. Remove items from the queue to see them here again.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {/* Responsive Cards Grid - 1 column mobile, 2 medium, 3 large */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
-                
-                    {/* Section Cards - Only show sections not in queue */}
-                    {scrapedData.sections.slice(0, 5).map((section, index) => {
-                      // Don't render if this section is in the queue
-                      if (isInQueue(`section-${index}`)) return null;
-                      
-                      return (
-                        <ContentCard
-                          key={`section-${index}`}
-                          id={`section-${index}`}
-                          title={section.title}
-                          content={section.content}
-                          type="section"
-                          index={index}
-                          isAnimating={isAnimating}
-                          hasAnimated={hasAnimated}
-                          onClick={() => handleAddSectionToQueue(index)}
-                        />
-                      );
-                    })}
-
-                    {/* Additional Sections (if more than 5) */}
-                    {scrapedData.sections.length > 5 && (
-                      <ContentCard
-                        key="more-sections"
-                        id="more-sections"
-                        title=""
-                        content=""
-                        type="more-sections"
-                        index={5}
-                        isAnimating={isAnimating}
-                        hasAnimated={hasAnimated}
-                        additionalSectionsCount={scrapedData.sections.length - 5}
-                      />
-                    )}
-
-                    {/* Summary Card - Only show if not in queue */}
-                    {scrapedData.text && isSummaryAvailable() && (
-                      <ContentCard
-                        key="summary"
-                        id="summary"
-                        title="Summary"
-                        content={extractSummary(scrapedData.text, 120)}
-                        type="summary"
-                        index={scrapedData.sections.slice(0, 5).filter((_, i) => !isInQueue(`section-${i}`)).length}
-                        isAnimating={isAnimating}
-                        hasAnimated={hasAnimated}
-                        onClick={handleAddSummaryToQueue}
-                      />
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Smart Chat & Listening Queue - Takes up 4/12 columns */}
-            <div className="xl:col-span-4">
-              <div className="xl:sticky xl:top-20 space-y-5">
-                
-                {/* Smart Chat Interface */}
-                <SmartChatPanel
-                  availableSections={getAvailableSectionsForChat()}
-                  onAddToQueue={handleSmartAddToQueue}
-                  onAddSummary={handleSmartAddSummary}
-                  isProcessing={false}
-                />
-
-                {/* Listening Queue */}
-                <ListeningQueue />
               </div>
             </div>
           </div>
         </div>
-      </main>
+
+        {/* Dashboard - Full Height 3-Column Layout */}
+        <div className="flex-1 px-3 lg:px-4 py-3 min-h-0">
+          <div className="h-full">
+            <div className="h-full grid grid-cols-1 lg:grid-cols-3 gap-3 lg:gap-4">
+            
+                           {/* Column 1: Content Cards */}
+               <div className="h-full flex flex-col min-h-0">
+                 <div className="bg-black/20 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl h-full flex flex-col min-h-0">
+                   {/* Column Header */}
+                   <div className="flex-shrink-0 px-3 py-2 border-b border-white/10">
+                     <div className="flex items-center gap-2">
+                       <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                       <h2 className="text-xs font-semibold text-white">Content Cards</h2>
+                       <span className="text-xs text-white/60 bg-white/10 px-2 py-0.5 rounded-full ml-auto">
+                         {getAvailableSections().length + (isSummaryAvailable() ? 1 : 0)}
+                       </span>
+                     </div>
+                   </div>
+                   
+                   {/* Scrollable Content */}
+                   <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent min-h-0">
+                     {/* Check if all content is in queue */}
+                     {getAvailableSections().length === 0 && !isSummaryAvailable() && scrapedData.sections.length <= 5 ? (
+                       <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                         <div className="text-2xl mb-2 opacity-60">🎧</div>
+                         <h3 className="text-xs font-semibold text-white mb-1">All Content Queued</h3>
+                         <p className="text-xs text-white/60 max-w-32">
+                           Remove items from the queue to see them here again.
+                         </p>
+                       </div>
+                     ) : (
+                       <div className="p-2 space-y-2 pb-4">
+                         {/* Section Cards - Only show sections not in queue */}
+                         {scrapedData.sections.slice(0, 5).map((section, index) => {
+                           // Don't render if this section is in the queue
+                           if (isInQueue(`section-${index}`)) return null;
+                           
+                           return (
+                             <ContentCard
+                               key={`section-${index}`}
+                               id={`section-${index}`}
+                               title={section.title}
+                               content={section.content}
+                               type="section"
+                               index={index}
+                               isAnimating={isAnimating}
+                               hasAnimated={hasAnimated}
+                               onClick={() => handleAddSectionToQueue(index)}
+                             />
+                           );
+                         })}
+
+                         {/* Additional Sections (if more than 5) */}
+                         {scrapedData.sections.length > 5 && (
+                           <ContentCard
+                             key="more-sections"
+                             id="more-sections"
+                             title=""
+                             content=""
+                             type="more-sections"
+                             index={5}
+                             isAnimating={isAnimating}
+                             hasAnimated={hasAnimated}
+                             additionalSectionsCount={scrapedData.sections.length - 5}
+                           />
+                         )}
+
+                         {/* Summary Card - Only show if not in queue */}
+                         {scrapedData.text && isSummaryAvailable() && (
+                           <ContentCard
+                             key="summary"
+                             id="summary"
+                             title="Summary"
+                             content={extractSummary(scrapedData.text, 120)}
+                             type="summary"
+                             index={scrapedData.sections.slice(0, 5).filter((_, i) => !isInQueue(`section-${i}`)).length}
+                             isAnimating={isAnimating}
+                             hasAnimated={hasAnimated}
+                             onClick={handleAddSummaryToQueue}
+                           />
+                         )}
+                       </div>
+                     )}
+                   </div>
+                 </div>
+               </div>
+
+               {/* Column 2: Listening Queue */}
+               <div className="h-full flex flex-col min-h-0">
+                 <div className="bg-black/20 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl h-full flex flex-col min-h-0">
+                   {/* Column Header */}
+                   <div className="flex-shrink-0 px-3 py-2 border-b border-white/10">
+                     <div className="flex items-center gap-2">
+                       <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                       <h2 className="text-xs font-semibold text-white">Listening Queue</h2>
+                     </div>
+                   </div>
+                   
+                   {/* Queue Content - Full Height */}
+                   <div className="flex-1 flex flex-col min-h-0 p-2">
+                     <div className="flex-1 min-h-0">
+                       <ListeningQueue />
+                     </div>
+                   </div>
+                 </div>
+               </div>
+
+               {/* Column 3: Smart Chat */}
+               <div className="h-full flex flex-col min-h-0">
+                 <div className="bg-black/20 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl h-full flex flex-col min-h-0">
+                   {/* Column Header */}
+                   <div className="flex-shrink-0 px-3 py-2 border-b border-white/10">
+                     <div className="flex items-center gap-2">
+                       <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
+                       <h2 className="text-xs font-semibold text-white">Smart Assistant</h2>
+                       <div className="ml-auto">
+                         <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>
+                       </div>
+                     </div>
+                   </div>
+                   
+                   {/* Chat Content - Full Height */}
+                   <div className="flex-1 flex flex-col min-h-0 p-2">
+                     <div className="flex-1 min-h-0">
+                       <SmartChatPanel
+                         availableSections={getAvailableSectionsForChat()}
+                         onAddToQueue={handleSmartAddToQueue}
+                         onAddSummary={handleSmartAddSummary}
+                         isProcessing={false}
+                       />
+                     </div>
+                   </div>
+                 </div>
+               </div>
+             </div>
+           </div>
+         </div>
+       </main>
 
       {/* Audio Player (Bottom Controls) */}
       <AudioPlayer />

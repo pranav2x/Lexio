@@ -202,24 +202,76 @@ const MaximizedPlayer: React.FC = () => {
 
           {/* All Words Display with Real-time Highlighting */}
           <div className="glass-card p-8 rounded-lg mb-20 min-h-[400px]" ref={contentRef}>
-            <div className="text-sm text-white/60 mb-6 font-mono-enhanced text-center">
-              Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} of {wordsData.filter(word => !word.isWhitespace).length}
-            </div>
-            
-            <WordHighlighter
-              wordsData={wordsData}
-              currentWordIndex={currentWordIndex}
-              isPlaying={isPlaying}
-              content={currentPlayingText}
-              onWordClick={(wordIndex) => {
-                if (wordsData[wordIndex] && !wordsData[wordIndex].isWhitespace) {
-                  handleSeek(wordsData[wordIndex].startTime);
-                }
-              }}
-              highlightedWordRef={highlightedWordRef}
-              compact={false}
-              textSize="lg"
-            />
+            {currentPlayingText ? (
+              <>
+                {wordsData.length > 0 ? (
+                  <>
+                    <div className="text-sm text-white/60 mb-6 font-mono-enhanced text-center">
+                      Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} of {wordsData.filter(word => !word.isWhitespace).length}
+                    </div>
+                    
+                    <WordHighlighter
+                      wordsData={wordsData}
+                      currentWordIndex={currentWordIndex}
+                      isPlaying={isPlaying}
+                      content={currentPlayingText}
+                      onWordClick={(wordIndex) => {
+                        if (wordsData[wordIndex] && !wordsData[wordIndex].isWhitespace) {
+                          handleSeek(wordsData[wordIndex].startTime);
+                        }
+                      }}
+                      highlightedWordRef={highlightedWordRef}
+                      compact={false}
+                      textSize="lg"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div className="text-sm text-white/60 mb-6 font-mono-enhanced text-center">
+                      Preparing word highlighting...
+                    </div>
+                    
+                    <div className="text-lg leading-9 font-mono-enhanced text-left space-y-2 text-white/80" style={{ wordSpacing: '0.2em' }}>
+                      {currentPlayingText.split(/(\s+)/).map((part, index) => (
+                        <span
+                          key={index}
+                          className={part.trim() ? 'hover:text-white/90 cursor-pointer px-1 py-1 rounded transition-all duration-75 mx-0.5' : ''}
+                        >
+                          {part}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            ) : isQueuePlaying && listeningQueue.length > 0 && currentQueueIndex !== -1 ? (
+              <>
+                <div className="text-sm text-white/60 mb-6 font-mono-enhanced text-center">
+                  Loading {listeningQueue[currentQueueIndex]?.title}...
+                </div>
+                
+                <div className="text-lg leading-9 font-mono-enhanced text-left space-y-2 text-white/80" style={{ wordSpacing: '0.2em' }}>
+                  {listeningQueue[currentQueueIndex]?.content?.split(/(\s+)/).map((part, index) => (
+                    <span
+                      key={index}
+                      className={part.trim() ? 'hover:text-white/90 cursor-pointer px-1 py-1 rounded transition-all duration-75 mx-0.5 opacity-60' : 'opacity-60'}
+                    >
+                      {part}
+                    </span>
+                  )) || (
+                    <div className="flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white/30"></div>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white/30 mb-4"></div>
+                <div className="text-lg text-white/60 font-mono-enhanced mb-2">Loading content...</div>
+                <div className="text-sm text-white/40 font-mono-enhanced">Preparing your listening experience</div>
+              </div>
+            )}
           </div>
         </div>
       </div>

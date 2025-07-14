@@ -47,6 +47,18 @@ export default function SmartChat({
     scrollToBottom();
   }, [messages]);
 
+  const addSystemMessage = (content: string, addedSections?: string[]) => {
+    const message: ChatMessage = {
+      id: Date.now().toString() + Math.random().toString(),
+      type: 'system',
+      content,
+      timestamp: new Date(),
+      addedSections
+    };
+    setMessages(prev => [...prev, message]);
+    return new Promise(resolve => setTimeout(resolve, 400)); // Shorter delay for faster interaction
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim() || isLoading) return;
@@ -63,6 +75,9 @@ export default function SmartChat({
     setIsLoading(true);
 
     try {
+      // Single concise processing message
+      await addSystemMessage("🔍 Analyzing request and searching content...");
+
       // Call our AI analysis API
       const response = await fetch('/api/analyze-chat', {
         method: 'POST',
@@ -82,9 +97,16 @@ export default function SmartChat({
       const data = await response.json();
 
       if (data.success) {
-        // Add matched sections to queue
         if (data.matchedSections.length > 0) {
+          // Show simple result and add to queue
+          if (data.addedSectionTitles && data.addedSectionTitles.length > 0) {
+            await addSystemMessage(`✅ Added ${data.matchedSections.length} section${data.matchedSections.length > 1 ? 's' : ''} to your queue${data.includeSummary ? ' + summary' : ''}!`, data.addedSectionTitles);
+          }
+          
+          // Add matched sections to queue
           onAddToQueue(data.matchedSections, data.explanation);
+        } else {
+          await addSystemMessage("🔍 No matching sections found for your request.");
         }
         
         // Add summary if requested
@@ -92,16 +114,11 @@ export default function SmartChat({
           onAddSummary();
         }
 
-        // Add system response
-        const systemMessage: ChatMessage = {
-          id: (Date.now() + 1).toString(),
-          type: 'system',
-          content: data.response,
-          timestamp: new Date(),
-          addedSections: data.addedSectionTitles
-        };
-
-        setMessages(prev => [...prev, systemMessage]);
+        // Show only a concise final response (limit to 150 chars)
+        const shortResponse = data.response.length > 150 
+          ? data.response.substring(0, 150) + "..." 
+          : data.response;
+        await addSystemMessage(shortResponse);
       } else {
         throw new Error(data.response || 'Failed to analyze message');
       }
@@ -110,7 +127,7 @@ export default function SmartChat({
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         type: 'system',
-        content: "Sorry, I encountered an error processing your request. Please try again.",
+        content: "❌ Sorry, I encountered an error processing your request. Please try again.",
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -118,6 +135,8 @@ export default function SmartChat({
       setIsLoading(false);
     }
   };
+
+
 
   const handleSuggestionClick = (suggestion: string) => {
     setInputValue(suggestion);
@@ -133,22 +152,22 @@ export default function SmartChat({
   ];
 
   return (
-    <div className="bg-neutral-900 border border-neutral-700 rounded-xl p-6 space-y-4">
+    <div className="bg-neutral-900 border border-neutral-700 rounded-xl p-6 h-full flex flex-col">
       {/* Header */}
-      <div>
+      <div className="flex-shrink-0 mb-4">
         <h3 className="text-lg font-semibold text-white">Smart Learning Assistant</h3>
         <p className="text-sm text-neutral-400">AI-powered content selection by Lexio</p>
       </div>
 
       {/* Chat Messages */}
-      <div className="h-64 overflow-y-auto space-y-3 border border-neutral-700 rounded-lg p-4 bg-neutral-800">
+      <div className="flex-1 overflow-y-auto space-y-3 border border-neutral-700 rounded-lg p-4 bg-neutral-800 min-h-0 mb-4">
         {messages.map((message) => (
           <div
             key={message.id}
             className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
                 message.type === 'user'
                   ? 'bg-white text-black'
                   : 'bg-neutral-700 border border-neutral-600 text-white'
@@ -157,12 +176,12 @@ export default function SmartChat({
               <p>{message.content}</p>
               {message.addedSections && message.addedSections.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-neutral-600">
-                  <p className="text-xs text-neutral-300 font-medium">Added to queue:</p>
-                  <ul className="text-xs text-neutral-300 mt-1">
+                  <p className="text-xs text-neutral-300 font-medium">Added:</p>
+                  <div className="text-xs text-neutral-300 mt-1">
                     {message.addedSections.map((section, index) => (
-                      <li key={index} className="truncate">• {section}</li>
+                      <div key={index} className="truncate">• {section}</div>
                     ))}
-                  </ul>
+                  </div>
                 </div>
               )}
               <div className="text-xs opacity-60 mt-1">
@@ -184,47 +203,50 @@ export default function SmartChat({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Quick Suggestions */}
-      <div className="space-y-2">
-        <p className="text-xs text-neutral-400">Quick suggestions:</p>
-        <div className="flex flex-wrap gap-2">
-          {suggestions.map((suggestion) => (
-            <button
-              key={suggestion}
-              onClick={() => handleSuggestionClick(suggestion)}
-              disabled={isLoading}
-              className="px-3 py-1 text-xs border border-neutral-600 rounded-full text-neutral-300 hover:text-white hover:border-neutral-500 hover:bg-neutral-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {suggestion}
-            </button>
-          ))}
+      {/* Bottom Section */}
+      <div className="flex-shrink-0 space-y-4">
+        {/* Quick Suggestions */}
+        <div className="space-y-2">
+          <p className="text-xs text-neutral-400">Quick suggestions:</p>
+          <div className="flex flex-wrap gap-2">
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                onClick={() => handleSuggestionClick(suggestion)}
+                disabled={isLoading}
+                className="px-3 py-1 text-xs border border-neutral-600 rounded-full text-neutral-300 hover:text-white hover:border-neutral-500 hover:bg-neutral-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {/* Input Form */}
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <input
+            type="text"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            placeholder="e.g., 'I want to learn about trade networks'"
+            disabled={isLoading || isProcessing}
+            className="flex-1 px-4 py-2 border border-neutral-600 rounded-lg text-sm bg-neutral-800 text-white placeholder-neutral-400 focus:outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 transition-all duration-200 disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={isLoading || isProcessing || !inputValue.trim()}
+            className="px-4 py-2 bg-white text-black text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+          >
+            {isLoading ? 'Analyzing...' : 'Send'}
+          </button>
+        </form>
+
+        {(isLoading || isProcessing) && (
+          <div className="text-xs text-neutral-400 text-center">
+            Please wait while Lexio analyzes your request and finds the best content...
+          </div>
+        )}
       </div>
-
-      {/* Input Form */}
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <input
-          type="text"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          placeholder="e.g., 'I want to learn about trade networks'"
-          disabled={isLoading || isProcessing}
-          className="flex-1 px-4 py-2 border border-neutral-600 rounded-lg text-sm bg-neutral-800 text-white placeholder-neutral-400 focus:outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 transition-all duration-200 disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={isLoading || isProcessing || !inputValue.trim()}
-          className="px-4 py-2 bg-white text-black text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-        >
-          {isLoading ? 'Analyzing...' : 'Send'}
-        </button>
-      </form>
-
-      {(isLoading || isProcessing) && (
-        <div className="text-xs text-neutral-400 text-center">
-          Please wait while Lexio analyzes your request and finds the best content...
-        </div>
-      )}
     </div>
   );
 } 
