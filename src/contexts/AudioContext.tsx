@@ -107,22 +107,26 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
   // Refs
   const audioRef = useRef<HTMLAudioElement>(null);
   
-  // Optimized word timing generation
+  // Enhanced word timing generation for better TTS synchronization
   const generateWordTimings = useCallback((text: string, audioDuration: number): WordData[] => {
     const words = text.split(/(\s+)/);
     const nonWhitespaceWords = words.filter(word => word.trim() !== '');
     
-    const totalSpeechTime = audioDuration * 0.98;
+    if (nonWhitespaceWords.length === 0) return [];
+    
+    // More realistic speech timing
+    const totalSpeechTime = audioDuration * 0.95; // Leave 5% buffer
     const averageWordDuration = totalSpeechTime / nonWhitespaceWords.length;
     
-    let currentTime = 0.05;
+    let currentTime = 0.1; // Small initial delay
     const wordTimings: WordData[] = [];
     
     words.forEach((word, index) => {
       const isWhitespace = word.trim() === '';
       
       if (isWhitespace) {
-        const pauseDuration = 0.01;
+        // Very short whitespace duration
+        const pauseDuration = 0.02;
         wordTimings.push({
           word,
           index,
@@ -132,14 +136,22 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
         });
         currentTime += pauseDuration;
       } else {
+        // Dynamic word duration based on length and complexity
         let wordDuration = averageWordDuration;
         
-        const lengthFactor = Math.pow(word.length / 5, 0.5);
+        // Adjust for word length (longer words take more time)
+        const lengthFactor = Math.max(0.7, Math.min(1.5, word.length / 6));
         wordDuration *= lengthFactor;
         
+        // Adjust for complexity (syllables, punctuation)
+        if (/[.!?]$/.test(word)) wordDuration *= 1.1; // Slight emphasis for sentence endings
+        if (/[,;:]$/.test(word)) wordDuration *= 1.05; // Slight pause for punctuation
+        
+        // Natural pause after word based on punctuation
         let pauseAfter = 0;
-        if (/[.!?]$/.test(word)) pauseAfter = averageWordDuration * 0.25;
-        else if (/[,;:]$/.test(word)) pauseAfter = averageWordDuration * 0.1;
+        if (/[.!?]$/.test(word)) pauseAfter = averageWordDuration * 0.3;
+        else if (/[,;:]$/.test(word)) pauseAfter = averageWordDuration * 0.15;
+        else pauseAfter = averageWordDuration * 0.05; // Small natural pause
         
         wordTimings.push({
           word,
@@ -153,14 +165,13 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
       }
     });
     
+    // Scale to fit actual audio duration
     const totalCalculatedTime = currentTime;
-    const scaleFactor = (audioDuration - 0.05) / (totalCalculatedTime - 0.05);
+    const scaleFactor = (audioDuration - 0.1) / (totalCalculatedTime - 0.1);
     
     wordTimings.forEach(timing => {
-      if (!timing.isWhitespace) {
-        timing.startTime = 0.05 + (timing.startTime - 0.05) * scaleFactor;
-        timing.endTime = 0.05 + (timing.endTime - 0.05) * scaleFactor;
-      }
+      timing.startTime = 0.1 + (timing.startTime - 0.1) * scaleFactor;
+      timing.endTime = 0.1 + (timing.endTime - 0.1) * scaleFactor;
     });
     
     return wordTimings;
@@ -170,12 +181,26 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
   const findCurrentWordIndex = useCallback((currentTime: number): number => {
     if (wordsData.length === 0 || currentTime < 0) return -1;
     
-    // Simple direct time-based matching for accuracy
-    const index = wordsData.findIndex((word) => 
-      !word.isWhitespace && currentTime >= word.startTime && currentTime <= word.endTime
-    );
+    // Find the closest word that should be highlighted at this time
+    // More forgiving approach - find the word we should be at or just passed
+    let bestIndex = -1;
     
-    return index;
+    for (let i = 0; i < wordsData.length; i++) {
+      const word = wordsData[i];
+      if (word.isWhitespace) continue;
+      
+      // If current time is within the word's time window
+      if (currentTime >= word.startTime && currentTime <= word.endTime) {
+        return i;
+      }
+      
+      // If current time is past this word's start time, this is a candidate
+      if (currentTime >= word.startTime) {
+        bestIndex = i;
+      }
+    }
+    
+    return bestIndex;
   }, [wordsData]);
 
   // Generate audio for a section
@@ -340,17 +365,21 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
         const currentAudioTime = audioRef.current?.currentTime || 0;
         const newWordIndex = findCurrentWordIndex(currentAudioTime);
         
-        if (newWordIndex !== currentWordIndex && newWordIndex !== -1) {
+        // Update word index if it changed (including -1 to handle gaps)
+        if (newWordIndex !== currentWordIndex) {
           setCurrentWordIndex(newWordIndex);
           
           // Debug logging for word highlighting
-          if (process.env.NODE_ENV === 'development' && wordsData[newWordIndex]) {
+          if (process.env.NODE_ENV === 'development' && newWordIndex >= 0 && wordsData[newWordIndex]) {
             console.log(`🔤 Word highlight: "${wordsData[newWordIndex].word}" (${newWordIndex}/${wordsData.length}) at ${currentAudioTime.toFixed(2)}s`);
           }
         }
-      }, 50); // Update every 50ms for smooth highlighting
+      }, 30); // Update every 30ms for smoother highlighting
       
       return () => clearInterval(interval);
+    } else if (!isPlaying) {
+      // Reset word index when not playing
+      // setCurrentWordIndex(-1);
     }
   }, [isPlaying, wordsData, findCurrentWordIndex, currentWordIndex, audioRef]);
 

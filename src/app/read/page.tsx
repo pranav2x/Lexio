@@ -478,7 +478,11 @@ const ReadPageContent: React.FC = () => {
          </div>
        </main>
 
+      {/* Audio Player (Bottom Controls) */}
+      <AudioPlayer />
 
+      {/* Maximized Player Overlay */}
+      <MaximizedPlayer />
     </div>
   );
 };

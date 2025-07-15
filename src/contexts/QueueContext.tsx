@@ -318,8 +318,8 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     }
   }, [isQueuePlaying, currentQueueIndex, listeningQueue, controlsRepeat, audioRef, audioUrl, clearAudio, estimateTextDuration, generateWordTimings, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, setAudioUrl, selectedVoiceId, stopQueuePlayback, setIsMaximized]);
 
-  // Enhanced queue control functions
-  const handleControlsPlayPause = useCallback(() => {
+  // Simplified and robust play/pause control
+  const handleControlsPlayPause = useCallback(async () => {
     console.log('🎮 Controls: Play button clicked', {
       queueLength: listeningQueue.length,
       hasAudioUrl: !!audioUrl,
@@ -330,52 +330,31 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
 
     // Priority 1: Start queue playback if queue has items and not currently playing
     if (listeningQueue.length > 0 && !isQueuePlaying) {
-      console.log('🎮 Controls: Starting queue playback and immediately maximizing');
-      // Clear any residual audio first
-      if (audioUrl) {
-        clearAudio();
-      }
-      // Immediately maximize the player when starting queue
+      console.log('🎮 Controls: Starting queue playback and maximizing');
       setIsMaximized(true);
-      playQueue();
+      await playQueue();
       return;
     }
 
-    // Priority 2: Handle queue playback controls
-    if (isQueuePlaying && audioRef.current) {
-      // Ensure maximization when resuming queue playback
-      if (!isPlaying) {
-        console.log('🎮 Controls: Resuming queue playback and maximizing');
-        setIsMaximized(true);
-      }
-      
+    // Priority 2: Handle queue or individual audio playback
+    if (audioRef.current) {
       try {
         if (isPlaying) {
-          console.log('🎮 Controls: Pausing queue playback');
+          console.log('🎮 Controls: Pausing audio');
           audioRef.current.pause();
         } else {
-          console.log('🎮 Controls: Playing queue audio');
-          audioRef.current.play();
+          console.log('🎮 Controls: Playing audio');
+          // Maximize when resuming playback
+          setIsMaximized(true);
+          await audioRef.current.play();
         }
       } catch (error) {
-        console.debug('Audio control action skipped:', error);
-      }
-      return;
-    }
-
-    // Priority 3: Handle individual audio playback
-    if (audioRef.current && audioUrl) {
-      try {
-        if (isPlaying) {
-          audioRef.current.pause();
-        } else {
-          audioRef.current.play();
-        }
-      } catch (error) {
-        console.debug('Audio control action skipped:', error);
+        console.warn('Audio playback action failed:', error);
+        // Reset states on error
+        setControlsPlaying(false);
       }
     }
-  }, [listeningQueue.length, audioUrl, isQueuePlaying, audioRef, isPlaying, playQueue, setIsMaximized, clearAudio, currentQueueIndex]);
+  }, [listeningQueue.length, audioUrl, isQueuePlaying, audioRef, isPlaying, playQueue, setIsMaximized, currentQueueIndex]);
 
   const handleControlsPrevious = useCallback(async () => {
     if (!isQueuePlaying || currentQueueIndex <= 0) return;
