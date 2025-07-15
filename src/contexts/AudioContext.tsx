@@ -17,7 +17,7 @@ type PlayingSection = 'summary' | `section-${number}` | null;
 interface AudioContextType {
   // Audio state
   audioUrl: string | null;
-  audioRef: React.RefObject<HTMLAudioElement>;
+  audioRef: React.RefObject<HTMLAudioElement | null>;
   isGeneratingAudio: boolean;
   audioError: string | null;
   duration: number;
@@ -166,55 +166,17 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
     return wordTimings;
   }, []);
 
-  // Enhanced word finding
+  // Accurate time-based word finding
   const findCurrentWordIndex = useCallback((currentTime: number): number => {
     if (wordsData.length === 0 || currentTime < 0) return -1;
     
-    const speedLookahead = playbackRate >= 1.5 ? 0.2 : playbackRate >= 1.25 ? 0.12 : 0.06;
-    const lookaheadTime = currentTime + speedLookahead;
+    // Simple direct time-based matching for accuracy
+    const index = wordsData.findIndex((word) => 
+      !word.isWhitespace && currentTime >= word.startTime && currentTime <= word.endTime
+    );
     
-    if (currentTime < 2.0) {
-      for (let i = 0; i < wordsData.length; i++) {
-        const word = wordsData[i];
-        if (!word.isWhitespace) {
-          if (currentTime >= word.startTime - 0.05) {
-            return i;
-          }
-        }
-      }
-    }
-    
-    for (let i = 0; i < wordsData.length; i++) {
-      const word = wordsData[i];
-      if (!word.isWhitespace) {
-        if (lookaheadTime >= word.startTime && lookaheadTime <= word.endTime) {
-          return i;
-        }
-      }
-    }
-    
-    for (let i = 0; i < wordsData.length; i++) {
-      const word = wordsData[i];
-      if (!word.isWhitespace) {
-        if (currentTime >= word.startTime && currentTime <= word.endTime) {
-          return i;
-        }
-      }
-    }
-    
-    for (let i = 0; i < wordsData.length; i++) {
-      const word = wordsData[i];
-      if (!word.isWhitespace && word.startTime > currentTime) {
-        const timeUntilWord = word.startTime - currentTime;
-        if (timeUntilWord < speedLookahead * 1.2) {
-          return i;
-        }
-        break;
-      }
-    }
-    
-    return -1;
-  }, [wordsData, playbackRate]);
+    return index;
+  }, [wordsData]);
 
   // Generate audio for a section
   const generateAudioForSection = useCallback(async (sectionType: PlayingSection, customText?: string) => {
@@ -268,7 +230,7 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
     setCurrentWordIndex(-1);
     setCurrentPlayingSection(null);
     setCurrentPlayingText('');
-    setIsMaximized(false);
+    // setIsMaximized(false); // Don't reset maximized state here; let UI layer control collapse
     
     if (audioUrl) {
       cleanupAudioUrl(audioUrl);
@@ -316,7 +278,7 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
     setCurrentWordIndex(-1);
     setWordsData([]);
     setIsPlaying(false);
-    setIsMaximized(false);
+    // setIsMaximized(false); // preserve UI zoom state
   }, [audioUrl]);
 
   // Handle cache clearing
@@ -371,39 +333,26 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
     }
   }, [audioUrl, playbackRate]);
 
-  // High-frequency word index updates
+  // Real-time TTS-synced word index updates (50ms intervals)
   useEffect(() => {
-    if (isPlaying && wordsData.length > 0 && currentTime >= 0 && !isNaN(currentTime)) {
-      const updateFrequency = playbackRate >= 1.5 ? 6 : 10;
-      
-      let animationId: number;
-      let lastUpdateTime = 0;
-      
-      const updateWordIndex = (timestamp: number) => {
-        if (timestamp - lastUpdateTime >= updateFrequency) {
-          const newWordIndex = findCurrentWordIndex(currentTime);
-          
-          if (newWordIndex !== currentWordIndex && newWordIndex !== -1) {
-            setCurrentWordIndex(newWordIndex);
-          }
-          
-          lastUpdateTime = timestamp;
-        }
+    if (isPlaying && wordsData.length > 0) {
+      const interval = setInterval(() => {
+        const currentAudioTime = audioRef.current?.currentTime || 0;
+        const newWordIndex = findCurrentWordIndex(currentAudioTime);
         
-        if (isPlaying) {
-          animationId = requestAnimationFrame(updateWordIndex);
+        if (newWordIndex !== currentWordIndex && newWordIndex !== -1) {
+          setCurrentWordIndex(newWordIndex);
+          
+          // Debug logging for word highlighting
+          if (process.env.NODE_ENV === 'development' && wordsData[newWordIndex]) {
+            console.log(`🔤 Word highlight: "${wordsData[newWordIndex].word}" (${newWordIndex}/${wordsData.length}) at ${currentAudioTime.toFixed(2)}s`);
+          }
         }
-      };
+      }, 50); // Update every 50ms for smooth highlighting
       
-      animationId = requestAnimationFrame(updateWordIndex);
-      
-      return () => {
-        if (animationId) {
-          cancelAnimationFrame(animationId);
-        }
-      };
+      return () => clearInterval(interval);
     }
-  }, [currentTime, isPlaying, wordsData, findCurrentWordIndex, currentWordIndex, playbackRate]);
+  }, [isPlaying, wordsData, findCurrentWordIndex, currentWordIndex, audioRef]);
 
   // Update cache stats in development
   useEffect(() => {

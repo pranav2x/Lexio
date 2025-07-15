@@ -503,6 +503,18 @@ html {
   box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
 }
 
+/* Enhanced pulse animation for real-time word highlighting */
+@keyframes word-pulse {
+  0%, 100% { 
+    opacity: 1;
+    background-color: rgba(255, 255, 255, 0.3);
+  }
+  50% { 
+    opacity: 0.8;
+    background-color: rgba(255, 255, 255, 0.5);
+  }
+}
+
 /* Prevent layout shifts and add smooth transforms */
 .gpu-accelerated {
   transform: translateZ(0);
@@ -562,4 +574,20 @@ html {
   font-family: 'JetBrains Mono', 'Monaco', 'Consolas', monospace;
   font-variant-ligatures: normal;
   font-feature-settings: "calt" 1, "liga" 1;
+}
+
+/* TTS Word Highlight Animation */
+@keyframes highlight {
+  0%, 100% { 
+    background-color: rgba(255,255,255,0.15);
+    box-shadow: 0 0 8px rgba(255,255,255,0.3);
+  }
+  50% { 
+    background-color: rgba(255,255,255,0.4);
+    box-shadow: 0 0 12px rgba(255,255,255,0.5);
+  }
+}
+
+.animate-highlight {
+  animation: highlight 1s ease-in-out infinite;
 }

@@ -160,7 +160,7 @@ export default function SmartChat({
       </div>
 
       {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto space-y-3 border border-neutral-700 rounded-lg p-4 bg-neutral-800 min-h-0 mb-4">
+      <div className="flex-1 overflow-y-auto space-y-3 border border-neutral-700 rounded-lg p-4 bg-neutral-800 min-h-0 mb-4 scrollbar-thin scrollbar-thumb-neutral-600 scrollbar-track-neutral-800">
         {messages.map((message) => (
           <div
             key={message.id}

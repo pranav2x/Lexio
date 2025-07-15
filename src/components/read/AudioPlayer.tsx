@@ -17,6 +17,7 @@ const AudioPlayer: React.FC = () => {
     handleSeek,
     handleStop,
     handleSpeedChange,
+    isMaximized,
     setIsMaximized,
   } = useAudio();
 
@@ -42,7 +43,9 @@ const AudioPlayer: React.FC = () => {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 glass-card border-t border-white/10 backdrop-blur-xl">
+    <div className={`fixed bottom-0 left-0 right-0 z-50 glass-card border-t border-white/10 backdrop-blur-xl overflow-hidden transition-all duration-300 ${
+      isMaximized ? 'h-[320px]' : 'h-[88px]'
+    }`}>
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-2">
         <div className="max-w-6xl mx-auto">
           <div className="flex flex-col gap-1">
@@ -94,11 +97,11 @@ const AudioPlayer: React.FC = () => {
                     </button>
                   )}
 
-                  {/* Previous - Only show when queue is playing */}
-                  {isQueuePlaying && listeningQueue.length > 1 && (
+                  {/* Previous - Show when queue has multiple items */}
+                  {listeningQueue.length > 1 && (
                     <button
                       onClick={handleControlsPrevious}
-                      disabled={currentQueueIndex <= 0}
+                      disabled={!isQueuePlaying || currentQueueIndex <= 0}
                       className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-150 hover:scale-105 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
                       aria-label="Previous track"
                     >
@@ -110,7 +113,14 @@ const AudioPlayer: React.FC = () => {
 
                   {/* Play/Pause - Main control */}
                   <button
-                    onClick={handleControlsPlayPause}
+                    onClick={() => {
+                      // Maximize when starting playback (smooth transition)
+                      if (!(isQueuePlaying ? controlsPlaying : isPlaying)) {
+                        setIsMaximized(true);
+                      }
+                      // Handle playback state change
+                      handleControlsPlayPause();
+                    }}
                     disabled={!audioUrl && listeningQueue.length === 0}
                     className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-150 hover:scale-105 neon-glow ${
                       (isQueuePlaying ? controlsPlaying : isPlaying)
@@ -130,11 +140,11 @@ const AudioPlayer: React.FC = () => {
                     )}
                   </button>
 
-                  {/* Next - Only show when queue is playing */}
-                  {isQueuePlaying && listeningQueue.length > 1 && (
+                  {/* Next - Show when queue has multiple items */}
+                  {listeningQueue.length > 1 && (
                     <button
                       onClick={handleControlsNext}
-                      disabled={currentQueueIndex >= listeningQueue.length - 1}
+                      disabled={!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1}
                       className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-150 hover:scale-105 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
                       aria-label="Next track"
                     >
@@ -171,18 +181,7 @@ const AudioPlayer: React.FC = () => {
                     </svg>
                   </button>
 
-                  {/* Maximize Button - Only show when queue is playing */}
-                  {isQueuePlaying && (
-                    <button
-                      onClick={() => setIsMaximized(true)}
-                      className="flex items-center justify-center w-8 h-8 rounded-full glass-card hover:bg-white/10 transition-all duration-150 hover:scale-105 neon-glow"
-                      aria-label="Maximize Player"
-                    >
-                      <svg className="w-4 h-4 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                      </svg>
-                    </button>
-                  )}
+
                 </div>
 
                 {/* Center - Status & Speed Control */}
@@ -225,18 +224,18 @@ const AudioPlayer: React.FC = () => {
                     )}
                   </div>
                   
-                  {/* Speed Control */}
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs text-white/50 hidden lg:block font-mono-enhanced">Speed:</span>
-                    <div className="flex items-center gap-0.5">
+                  {/* Enhanced Speed Control */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-white/60 hidden lg:block font-mono-enhanced">Speed:</span>
+                    <div className="flex items-center gap-1">
                       {speedOptions.map((speed) => (
                         <button
                           key={speed}
                           onClick={() => handleSpeedChange(speed)}
-                          className={`px-2.5 py-1 rounded text-xs font-medium transition-all duration-150 font-mono-enhanced ${
+                          className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all duration-200 font-mono-enhanced hover:scale-105 ${
                             playbackRate === speed
-                              ? 'bg-white/15 text-white border border-white/30'
-                              : 'bg-white/5 text-white/70 border border-transparent hover:bg-white/10 hover:text-white/90 hover:border-white/20'
+                              ? 'bg-white text-black shadow-lg neon-glow'
+                              : 'bg-white/10 text-white/80 border border-white/20 hover:bg-white/20 hover:text-white hover:border-white/40'
                           }`}
                           role="button"
                           aria-pressed={playbackRate === speed}

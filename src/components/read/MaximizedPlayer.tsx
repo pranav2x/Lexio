@@ -177,30 +177,30 @@ const MaximizedPlayer: React.FC = () => {
             </button>
           </div>
 
-          {/* Speed Controls - Compact */}
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <span className="text-xs text-white/50 font-mono-enhanced">Speed:</span>
-            <div className="flex items-center gap-1">
+          {/* Enhanced Clickable Playback Speed Controls */}
+          <div className="flex items-center justify-center gap-3 mb-6">
+            <span className="text-sm text-white/60 font-mono-enhanced">Playback Speed:</span>
+            <div className="flex items-center gap-2">
               {speedOptions.map((speed) => (
                 <button
                   key={speed}
                   onClick={() => handleSpeedChange(speed)}
-                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors duration-150 hover:scale-105 font-mono-enhanced border ${
-                    playbackRate === speed
-                      ? 'bg-white/20 text-white border-white/30 shadow-sm'
-                      : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white/90 hover:border-white/20'
+                  className={`px-4 py-2 rounded-lg text-sm font-bold transition-all duration-200 hover:scale-105 font-mono-enhanced ${
+                    playbackRate === speed 
+                      ? 'bg-white text-black font-semibold shadow-lg neon-glow transform scale-110' 
+                      : 'bg-white/10 text-white/80 hover:bg-white/20 border border-white/20 hover:border-white/40'
                   }`}
                   role="button"
                   aria-pressed={playbackRate === speed}
                   aria-label={`Set playback speed to ${speed}x${playbackRate === speed ? ' (currently selected)' : ''}`}
                 >
-                  {speed}x
+                  {speed}×
                 </button>
               ))}
             </div>
           </div>
 
-          {/* All Words Display with Real-time Highlighting */}
+          {/* Real-Time Word Highlighting Display */}
           <div className="glass-card p-8 rounded-lg mb-20 min-h-[400px]" ref={contentRef}>
             {currentPlayingText ? (
               <>
@@ -210,14 +210,16 @@ const MaximizedPlayer: React.FC = () => {
                       Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} of {wordsData.filter(word => !word.isWhitespace).length}
                     </div>
                     
+                    {/* Enhanced Real-time Word Highlighting using WordHighlighter component */}
                     <WordHighlighter
                       wordsData={wordsData}
                       currentWordIndex={currentWordIndex}
                       isPlaying={isPlaying}
                       content={currentPlayingText}
                       onWordClick={(wordIndex) => {
-                        if (wordsData[wordIndex] && !wordsData[wordIndex].isWhitespace) {
-                          handleSeek(wordsData[wordIndex].startTime);
+                        const wordData = wordsData[wordIndex];
+                        if (wordData && !wordData.isWhitespace && wordData.startTime !== undefined) {
+                          handleSeek(wordData.startTime);
                         }
                       }}
                       highlightedWordRef={highlightedWordRef}
@@ -231,16 +233,16 @@ const MaximizedPlayer: React.FC = () => {
                       Preparing word highlighting...
                     </div>
                     
-                    <div className="text-lg leading-9 font-mono-enhanced text-left space-y-2 text-white/80" style={{ wordSpacing: '0.2em' }}>
-                      {currentPlayingText.split(/(\s+)/).map((part, index) => (
-                        <span
-                          key={index}
-                          className={part.trim() ? 'hover:text-white/90 cursor-pointer px-1 py-1 rounded transition-all duration-75 mx-0.5' : ''}
-                        >
-                          {part}
-                        </span>
-                      ))}
-                    </div>
+                    {/* Fallback display while word timings are being prepared */}
+                    <WordHighlighter
+                      wordsData={[]}
+                      currentWordIndex={-1}
+                      isPlaying={isPlaying}
+                      content={currentPlayingText}
+                      onWordClick={() => {}}
+                      compact={false}
+                      textSize="lg"
+                    />
                   </>
                 )}
               </>
@@ -250,20 +252,21 @@ const MaximizedPlayer: React.FC = () => {
                   Loading {listeningQueue[currentQueueIndex]?.title}...
                 </div>
                 
-                <div className="text-lg leading-9 font-mono-enhanced text-left space-y-2 text-white/80" style={{ wordSpacing: '0.2em' }}>
-                  {listeningQueue[currentQueueIndex]?.content?.split(/(\s+)/).map((part, index) => (
-                    <span
-                      key={index}
-                      className={part.trim() ? 'hover:text-white/90 cursor-pointer px-1 py-1 rounded transition-all duration-75 mx-0.5 opacity-60' : 'opacity-60'}
-                    >
-                      {part}
-                    </span>
-                  )) || (
-                    <div className="flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white/30"></div>
-                    </div>
-                  )}
-                </div>
+                {listeningQueue[currentQueueIndex]?.content ? (
+                  <WordHighlighter
+                    wordsData={[]}
+                    currentWordIndex={-1}
+                    isPlaying={false}
+                    content={listeningQueue[currentQueueIndex].content}
+                    onWordClick={() => {}}
+                    compact={false}
+                    textSize="lg"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white/30"></div>
+                  </div>
+                )}
               </>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-center">

@@ -28,6 +28,14 @@ interface QueueItem {
   content: string;
 }
 
+// PlayerLayer: groups audio player UI
+const PlayerLayer = () => (
+  <>
+    <AudioPlayer />
+    <MaximizedPlayer />
+  </>
+);
+
 // Main ReadPage Content Component
 const ReadPageContent: React.FC = () => {
   const router = useRouter();
@@ -157,7 +165,7 @@ const ReadPageContent: React.FC = () => {
   }
 
   return (
-    <div className="h-screen text-white overflow-hidden flex flex-col">
+    <div className="h-screen text-white overflow-y-auto flex flex-col">
       <style jsx>{`
         .line-clamp-3 {
           display: -webkit-box;
@@ -482,11 +490,8 @@ const ReadPageContent: React.FC = () => {
          </div>
        </main>
 
-      {/* Audio Player (Bottom Controls) */}
-      <AudioPlayer />
-
-      {/* Maximized Player Overlay */}
-      <MaximizedPlayer />
+      {/* Player UI Layer */}
+      <PlayerLayer />
     </div>
   );
 };

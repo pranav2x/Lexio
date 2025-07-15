@@ -162,7 +162,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     setControlsPlaying(false);
     setControlsProgress(0);
     setControlsCurrentTime(0);
-    setIsMaximized(false);
+    // setIsMaximized(false); // Removed to prevent abrupt UI collapse when queue ends or is manually stopped
     setIsPreloading(false);
   }, [audioRef, clearAudio, setCurrentPlayingSection, setCurrentPlayingText, setCurrentWordIndex, setWordsData, setIsMaximized, setIsPreloading]);
 
@@ -175,13 +175,14 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
   const playQueue = useCallback(async () => {
     if (listeningQueue.length === 0) return;
     
-    const firstItem = listeningQueue[0];
+    const startIndex = currentQueueIndex >= 0 ? currentQueueIndex : 0;
+    const firstItem = listeningQueue[startIndex];
     
     console.log('🚀 Queue: Starting playback for:', firstItem.title);
     
     // Set basic state and content immediately for instant display
     setIsQueuePlaying(true);
-    setCurrentQueueIndex(0);
+    setCurrentQueueIndex(startIndex);
     setCurrentPlayingText(firstItem.content);
     setCurrentPlayingSection(firstItem.id as any);
     setCurrentWordIndex(-1);
@@ -245,7 +246,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       setCurrentQueueIndex(-1);
       setIsPreloading(false);
     }
-  }, [listeningQueue, estimateTextDuration, generateWordTimings, setIsPreloading, setIsQueuePlaying, setIsMaximized, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, selectedVoiceId, audioRef]);
+  }, [listeningQueue, estimateTextDuration, generateWordTimings, setIsPreloading, setIsQueuePlaying, setIsMaximized, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, selectedVoiceId, audioRef, currentQueueIndex]);
 
   // Handle automatic queue progression
   const playNextInQueue = useCallback(async () => {
@@ -269,6 +270,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     if (nextIndex >= listeningQueue.length) {
       console.log('🏁 Queue finished: Clearing all state');
       stopQueuePlayback();
+      setIsMaximized(false); // collapse UI when queue finishes
       return;
     }
     
@@ -314,7 +316,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       setCurrentQueueIndex(-1);
       setControlsPlaying(false);
     }
-  }, [isQueuePlaying, currentQueueIndex, listeningQueue, controlsRepeat, audioRef, audioUrl, clearAudio, estimateTextDuration, generateWordTimings, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, setAudioUrl, selectedVoiceId, stopQueuePlayback]);
+  }, [isQueuePlaying, currentQueueIndex, listeningQueue, controlsRepeat, audioRef, audioUrl, clearAudio, estimateTextDuration, generateWordTimings, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, setAudioUrl, selectedVoiceId, stopQueuePlayback, setIsMaximized]);
 
   // Enhanced queue control functions
   const handleControlsPlayPause = useCallback(() => {

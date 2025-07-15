@@ -24,7 +24,7 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
 }) => {
   return (
     <div className="w-full h-full queue-zone-enhanced rounded-xl p-3 gpu-accelerated shadow-lg flex flex-col">
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         <SmartChat
           availableSections={availableSections}
           onAddToQueue={onAddToQueue}
