@@ -18,23 +18,11 @@ import ListeningQueue from "@/components/read/ListeningQueue";
 import AudioPlayer from "@/components/read/AudioPlayer";
 import MaximizedPlayer from "@/components/read/MaximizedPlayer";
 
-// HooksHooks
+// Hooks
 import { useQueue } from "@/contexts/QueueContext";
 import { useAudio } from "@/contexts/AudioContext";
 
-interface QueueItem {
-  id: string;
-  title: string;
-  content: string;
-}
 
-// PlayerLayer: groups audio player UI
-const PlayerLayer = () => (
-  <>
-    <AudioPlayer />
-    <MaximizedPlayer />
-  </>
-);
 
 // Main ReadPage Content Component
 const ReadPageContent: React.FC = () => {
@@ -490,8 +478,7 @@ const ReadPageContent: React.FC = () => {
          </div>
        </main>
 
-      {/* Player UI Layer */}
-      <PlayerLayer />
+
     </div>
   );
 };

@@ -19,19 +19,33 @@ const MaximizedPlayer: React.FC = () => {
     formatTime,
     handleSeek,
     handleSpeedChange,
+    handlePlayPause,
   } = useAudio();
 
   const {
     listeningQueue,
     currentQueueIndex,
     isQueuePlaying,
-    controlsPlaying,
     handleControlsPlayPause,
     handleControlsPrevious,
     handleControlsNext,
-    handleControlsRepeat,
-    controlsRepeat,
   } = useQueue();
+
+  // Get current item for display
+  const currentItem = isQueuePlaying && listeningQueue.length > 0 && currentQueueIndex >= 0 
+    ? listeningQueue[currentQueueIndex] 
+    : null;
+
+  // Unified play/pause handler that works for both queue and individual audio
+  const handlePlayPauseClick = () => {
+    if (listeningQueue.length > 0 && handleControlsPlayPause) {
+      // If there's a queue, use queue controls
+      handleControlsPlayPause();
+    } else {
+      // If no queue, use direct audio controls
+      handlePlayPause();
+    }
+  };
 
   const highlightedWordRef = useRef<HTMLSpanElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -130,16 +144,16 @@ const MaximizedPlayer: React.FC = () => {
 
             {/* Play/Pause - Perfectly Centered */}
             <button
-              onClick={handleControlsPlayPause}
+              onClick={handlePlayPauseClick}
               disabled={!duration && listeningQueue.length === 0}
               className={`relative flex items-center justify-center w-16 h-16 rounded-full transition-all duration-300 hover:scale-110 neon-glow ${
-                (isQueuePlaying ? controlsPlaying : isPlaying)
+                isPlaying
                   ? 'bg-red-500/20 text-red-400 border border-red-400/30'
                   : 'btn-premium'
               } disabled:opacity-50 disabled:cursor-not-allowed`}
-              aria-label={(isQueuePlaying ? controlsPlaying : isPlaying) ? 'Pause' : 'Play'}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
             >
-              {(isQueuePlaying ? controlsPlaying : isPlaying) ? (
+              {isPlaying ? (
                 <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6" />
                 </svg>
@@ -162,17 +176,15 @@ const MaximizedPlayer: React.FC = () => {
               </svg>
             </button>
 
-            {/* Loop/Repeat */}
+            {/* Skip Forward 10s */}
             <button
-              onClick={handleControlsRepeat}
-              disabled={listeningQueue.length === 0}
-              className={`flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed ${
-                controlsRepeat ? 'bg-white/20 text-white neon-glow border border-white/30' : 'glass-card text-white/60 hover:bg-white/10 hover:text-white'
-              }`}
-              aria-label="Loop current track"
+              onClick={() => handleSeek(Math.min(currentTime + 10, duration))}
+              disabled={!duration}
+              className="flex items-center justify-center w-12 h-12 rounded-full glass-card hover:bg-white/10 transition-all duration-300 hover:scale-110 micro-bounce disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Skip forward 10 seconds"
             >
               <svg className="w-6 h-6 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
               </svg>
             </button>
           </div>
@@ -202,24 +214,29 @@ const MaximizedPlayer: React.FC = () => {
 
           {/* Real-Time Word Highlighting Display */}
           <div className="glass-card p-8 rounded-lg mb-20 min-h-[400px]" ref={contentRef}>
-            {currentPlayingText ? (
+            {/* Show content if we have either currentPlayingText or currentItem */}
+            {(currentPlayingText || currentItem?.content) ? (
               <>
-                {wordsData.length > 0 ? (
+                {/* Use currentPlayingText if available, otherwise fall back to currentItem.content */}
+                {wordsData.length > 0 && currentPlayingText ? (
                   <>
                     <div className="text-sm text-white/60 mb-6 font-mono-enhanced text-center">
                       Word {wordsData.filter((word, index) => !word.isWhitespace && index <= currentWordIndex).length} of {wordsData.filter(word => !word.isWhitespace).length}
+                      {duration > 0 && (
+                        <span className="ml-4">
+                          {Math.round((currentTime / duration) * 100)}% complete
+                        </span>
+                      )}
                     </div>
                     
-                    {/* Enhanced Real-time Word Highlighting using WordHighlighter component */}
                     <WordHighlighter
                       wordsData={wordsData}
                       currentWordIndex={currentWordIndex}
                       isPlaying={isPlaying}
                       content={currentPlayingText}
                       onWordClick={(wordIndex) => {
-                        const wordData = wordsData[wordIndex];
-                        if (wordData && !wordData.isWhitespace && wordData.startTime !== undefined) {
-                          handleSeek(wordData.startTime);
+                        if (wordsData[wordIndex] && !wordsData[wordIndex].isWhitespace) {
+                          handleSeek(wordsData[wordIndex].startTime);
                         }
                       }}
                       highlightedWordRef={highlightedWordRef}
@@ -229,50 +246,32 @@ const MaximizedPlayer: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    <div className="text-sm text-white/60 mb-6 font-mono-enhanced text-center">
-                      Preparing word highlighting...
-                    </div>
+                    {/* Show content even if word timings aren't ready yet */}
+                    {currentPlayingText && (
+                      <div className="text-center text-white/60 mb-6 font-mono-enhanced">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white/30 mx-auto mb-2"></div>
+                        Preparing enhanced word highlighting...
+                      </div>
+                    )}
                     
-                    {/* Fallback display while word timings are being prepared */}
-                    <WordHighlighter
-                      wordsData={[]}
-                      currentWordIndex={-1}
-                      isPlaying={isPlaying}
-                      content={currentPlayingText}
-                      onWordClick={() => {}}
-                      compact={false}
-                      textSize="lg"
-                    />
+                    <div className="text-xl leading-10 font-mono-enhanced text-left space-y-4 text-white/90" style={{ wordSpacing: '0.3em' }}>
+                      {(currentPlayingText || currentItem?.content || '').split(/(\s+)/).map((part, index) => (
+                        <span
+                          key={index}
+                          className={part.trim() ? 'hover:text-white cursor-pointer px-2 py-1 rounded transition-all duration-150 hover:bg-white/10' : ''}
+                        >
+                          {part}
+                        </span>
+                      ))}
+                    </div>
                   </>
-                )}
-              </>
-            ) : isQueuePlaying && listeningQueue.length > 0 && currentQueueIndex !== -1 ? (
-              <>
-                <div className="text-sm text-white/60 mb-6 font-mono-enhanced text-center">
-                  Loading {listeningQueue[currentQueueIndex]?.title}...
-                </div>
-                
-                {listeningQueue[currentQueueIndex]?.content ? (
-                  <WordHighlighter
-                    wordsData={[]}
-                    currentWordIndex={-1}
-                    isPlaying={false}
-                    content={listeningQueue[currentQueueIndex].content}
-                    onWordClick={() => {}}
-                    compact={false}
-                    textSize="lg"
-                  />
-                ) : (
-                  <div className="flex items-center justify-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white/30"></div>
-                  </div>
                 )}
               </>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white/30 mb-4"></div>
-                <div className="text-lg text-white/60 font-mono-enhanced mb-2">Loading content...</div>
-                <div className="text-sm text-white/40 font-mono-enhanced">Preparing your listening experience</div>
+                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-gradient-to-r from-blue-400 to-purple-400 mb-6"></div>
+                <div className="text-2xl text-white/80 font-mono-enhanced mb-4">Preparing Experience</div>
+                <div className="text-lg text-white/60 font-mono-enhanced">Loading your personalized content...</div>
               </div>
             )}
           </div>

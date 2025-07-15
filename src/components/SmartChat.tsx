@@ -16,7 +16,7 @@ interface SmartChatProps {
     content: string;
     index: number;
   }>;
-  onAddToQueue: (sectionIndices: number[], explanation: string) => void;
+  onAddToQueue: (sectionIndices: number[], explanation: string, autoMaximize?: boolean) => void;
   onAddSummary: () => void;
   isProcessing?: boolean;
 }
