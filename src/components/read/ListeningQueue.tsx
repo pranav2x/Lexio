@@ -5,6 +5,22 @@ import { useQueue } from '@/contexts/QueueContext';
 import { useAudio } from '@/contexts/AudioContext';
 import WordHighlighter from './WordHighlighter';
 
+// Helper function to truncate text at word boundaries
+const truncateAtWordBoundary = (text: string, maxLength: number): string => {
+  if (text.length <= maxLength) return text;
+  
+  // Find the last space within the limit
+  let truncated = text.substring(0, maxLength);
+  const lastSpaceIndex = truncated.lastIndexOf(' ');
+  
+  // If we found a space, truncate there
+  if (lastSpaceIndex > 0) {
+    truncated = truncated.substring(0, lastSpaceIndex);
+  }
+  
+  return truncated + '...';
+};
+
 const ListeningQueue: React.FC = () => {
   const {
     listeningQueue,
@@ -29,22 +45,62 @@ const ListeningQueue: React.FC = () => {
   return (
     <div className="w-full h-full queue-zone-enhanced rounded-xl p-4 gpu-accelerated flex flex-col overflow-hidden shadow-lg">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg text-gradient font-mono-enhanced">🎧 Listening Queue</h3>
+        <div className="flex items-center gap-3">
+          <div className="w-5 h-5 glass-card rounded-full flex items-center justify-center">
+            <svg className="w-3 h-3 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+            </svg>
+          </div>
+          <h3 className="text-lg text-gradient font-mono-enhanced">Listening Queue</h3>
+        </div>
         {listeningQueue.length > 0 && (
           <button
             onClick={clearQueue}
-            className="text-xs text-white/50 hover:text-red-400 transition-all duration-300 btn-premium px-2 py-1 rounded font-mono-enhanced"
+            className="text-xs text-white/50 hover:text-white/80 transition-all duration-300 btn-premium px-3 py-1 rounded font-mono-enhanced"
           >
-            Clear
+            Clear All
           </button>
         )}
       </div>
 
       {listeningQueue.length === 0 ? (
         <div className="flex flex-col items-center justify-center flex-1 text-sm transition-all duration-500 text-white/60">
-          <div className="text-4xl mb-4">📥</div>
-          <div className="text-base font-semibold mb-2 text-center font-mono-enhanced text-gradient">Your Listening Queue</div>
-          <div className="text-xs text-white/50 text-center px-4 font-mono-enhanced leading-relaxed">Use the Smart Learning Assistant above to tell me what you want to learn!</div>
+          {/* Enhanced empty state with better visuals */}
+          <div className="relative mb-6">
+            <div className="w-24 h-24 glass-card rounded-full flex items-center justify-center mb-4 neon-glow bg-gradient-to-br from-white/10 to-white/5">
+              <svg className="w-12 h-12 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            
+            {/* Floating animation elements - now all white */}
+            <div className="absolute -top-2 -right-2 w-4 h-4 bg-white/20 rounded-full animate-pulse"></div>
+            <div className="absolute -bottom-2 -left-2 w-3 h-3 bg-white/15 rounded-full animate-pulse" style={{animationDelay: '0.5s'}}></div>
+            <div className="absolute top-8 -left-4 w-2 h-2 bg-white/10 rounded-full animate-pulse" style={{animationDelay: '1s'}}></div>
+          </div>
+          
+          <div className="text-center space-y-4 max-w-xs">
+            <div className="text-lg font-bold text-gradient font-mono-enhanced">Your Queue is Empty</div>
+            <div className="text-sm text-white/70 font-mono-enhanced leading-relaxed">
+              Use the <span className="text-white/90 font-semibold">Smart Learning Assistant</span> to add content to your listening queue
+            </div>
+            
+            {/* Action suggestions */}
+            <div className="mt-6 space-y-2">
+              <div className="text-xs text-white/50 font-mono-enhanced font-medium">Try saying:</div>
+              <div className="space-y-1">
+                <div className="glass-card px-3 py-2 rounded-lg text-xs text-white/70 font-mono-enhanced">
+                  "I want to learn about trade networks"
+                </div>
+                <div className="glass-card px-3 py-2 rounded-lg text-xs text-white/70 font-mono-enhanced">
+                  "Add the Mongol Empire section"
+                </div>
+                <div className="glass-card px-3 py-2 rounded-lg text-xs text-white/70 font-mono-enhanced">
+                  "Give me a summary of everything"
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       ) : (
         <>
@@ -60,7 +116,7 @@ const ListeningQueue: React.FC = () => {
               </h3>
               
               {/* Word-by-word highlighting display */}
-              <div className="glass-card p-3 rounded-lg mb-4 max-h-32 overflow-y-auto">
+              <div className="glass-card p-3 rounded-lg mb-4 max-h-32 overflow-y-auto custom-scrollbar">
                 <WordHighlighter
                   wordsData={wordsData}
                   currentWordIndex={currentWordIndex}
@@ -89,7 +145,7 @@ const ListeningQueue: React.FC = () => {
           )}
 
           {/* Queue List */}
-          <div className="flex-1 space-y-2 mb-6 overflow-y-auto overflow-x-hidden px-1 py-1">
+          <div className="flex-1 space-y-2 mb-6 overflow-y-auto overflow-x-hidden px-1 py-1 custom-scrollbar">
             <h4 className="text-sm font-semibold text-white/70 mb-3 font-mono-enhanced">Queue ({listeningQueue.length} items)</h4>
             {listeningQueue.map((item, index) => (
               <div
@@ -112,12 +168,12 @@ const ListeningQueue: React.FC = () => {
                   </div>
                   <div className="font-semibold text-xs truncate mb-1 font-mono-enhanced">{item.title}</div>
                   <div className="text-xs text-white/60 leading-relaxed font-mono-enhanced">
-                    {item.content.slice(0, 70)}...
+                    {truncateAtWordBoundary(item.content, 70)}
                   </div>
                 </div>
                 <button
                   onClick={() => removeFromQueue(item.id)}
-                  className="ml-4 btn-premium p-2 rounded-lg transition-all duration-300 flex-shrink-0 hover:bg-red-500/20 hover:border-red-400/30 text-white/60 hover:text-red-400"
+                  className="ml-4 btn-premium p-2 rounded-lg transition-all duration-300 flex-shrink-0 hover:bg-white/10 hover:border-white/30 text-white/60 hover:text-white/90"
                   disabled={currentQueueIndex === index && isQueuePlaying}
                   title="Remove from queue (returns to main content)"
                 >

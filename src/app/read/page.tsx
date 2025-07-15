@@ -91,12 +91,21 @@ const ReadPageContent: React.FC = () => {
   };
 
   // Add to queue functions for buttons
-  const handleAddSectionToQueue = (sectionIndex: number) => {
-    if (!scrapedData?.sections[sectionIndex]) return;
+  const handleAddSectionToQueue = (index: number) => {
+    if (!scrapedData) return;
     
-    const section = scrapedData.sections[sectionIndex];
+    const section = scrapedData.sections[index];
+    if (!section) return;
+    
+    console.log('🔍 Adding section to queue:', {
+      index,
+      title: section.title,
+      contentLength: section.content?.length || 0,
+      hasContent: Boolean(section.content && section.content.trim().length > 0)
+    });
+    
     addToQueue({
-      id: `section-${sectionIndex}`,
+      id: `section-${index}`,
       title: section.title,
       content: section.content
     });
@@ -106,6 +115,13 @@ const ReadPageContent: React.FC = () => {
     if (!scrapedData) return;
     
     const summaryContent = extractSummary(scrapedData.cleanText || scrapedData.text, 1000);
+    
+    console.log('🔍 Adding summary to queue:', {
+      title: 'Summary',
+      contentLength: summaryContent?.length || 0,
+      hasContent: Boolean(summaryContent && summaryContent.trim().length > 0)
+    });
+    
     addToQueue({
       id: 'summary',
       title: 'Summary',
@@ -350,7 +366,7 @@ const ReadPageContent: React.FC = () => {
                    {/* Column Header */}
                    <div className="flex-shrink-0 px-3 py-2 border-b border-white/10">
                      <div className="flex items-center gap-2">
-                       <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                       <div className="w-2 h-2 bg-white/70 rounded-full"></div>
                        <h2 className="text-xs font-semibold text-white">Content Cards</h2>
                        <span className="text-xs text-white/60 bg-white/10 px-2 py-0.5 rounded-full ml-auto">
                          {getAvailableSections().length + (isSummaryAvailable() ? 1 : 0)}
@@ -359,7 +375,7 @@ const ReadPageContent: React.FC = () => {
                    </div>
                    
                    {/* Scrollable Content */}
-                   <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent min-h-0">
+                   <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
                      {/* Check if all content is in queue */}
                      {getAvailableSections().length === 0 && !isSummaryAvailable() && scrapedData.sections.length <= 5 ? (
                        <div className="flex flex-col items-center justify-center h-full text-center p-4">
@@ -412,7 +428,7 @@ const ReadPageContent: React.FC = () => {
                              key="summary"
                              id="summary"
                              title="Summary"
-                             content={extractSummary(scrapedData.text, 120)}
+                             content={extractSummary(scrapedData.text, 200)}
                              type="summary"
                              index={scrapedData.sections.slice(0, 5).filter((_, i) => !isInQueue(`section-${i}`)).length}
                              isAnimating={isAnimating}
@@ -432,7 +448,7 @@ const ReadPageContent: React.FC = () => {
                    {/* Column Header */}
                    <div className="flex-shrink-0 px-3 py-2 border-b border-white/10">
                      <div className="flex items-center gap-2">
-                       <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                       <div className="w-2 h-2 bg-white/60 rounded-full"></div>
                        <h2 className="text-xs font-semibold text-white">Listening Queue</h2>
                      </div>
                    </div>
@@ -452,10 +468,10 @@ const ReadPageContent: React.FC = () => {
                    {/* Column Header */}
                    <div className="flex-shrink-0 px-3 py-2 border-b border-white/10">
                      <div className="flex items-center gap-2">
-                       <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
+                       <div className="w-2 h-2 bg-white/50 rounded-full"></div>
                        <h2 className="text-xs font-semibold text-white">Smart Assistant</h2>
                        <div className="ml-auto">
-                         <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>
+                         <div className="w-1.5 h-1.5 bg-white/80 rounded-full animate-pulse"></div>
                        </div>
                      </div>
                    </div>

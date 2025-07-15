@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { generateSpeech, cleanupAudioUrl, estimateTextDuration, getTTSCacheStats } from '@/lib/tts';
+import { generateSpeech, cleanupAudioUrl, estimateTextDuration } from '@/lib/tts';
 import { useLexioState } from '@/lib/store';
 import { useAudio } from './AudioContext';
 
@@ -12,37 +12,27 @@ interface QueueItem {
 }
 
 interface QueueContextType {
-  // Queue state
   listeningQueue: QueueItem[];
   currentQueueIndex: number;
   isQueuePlaying: boolean;
-  
-  // Queue controls state
   controlsPlaying: boolean;
   controlsProgress: number;
   controlsCurrentTime: number;
   controlsShuffle: boolean;
   controlsRepeat: boolean;
-  
-  // Queue management
+  lastKnownContent: string;
   addToQueue: (item: QueueItem) => void;
   removeFromQueue: (id: string) => void;
   clearQueue: () => void;
   isInQueue: (itemId: string) => boolean;
-  
-  // Queue playback
   playQueue: () => Promise<void>;
   stopQueuePlayback: () => void;
   playNextInQueue: () => Promise<void>;
-  
-  // Queue controls
   handleControlsPlayPause: () => void;
   handleControlsPrevious: () => Promise<void>;
   handleControlsNext: () => Promise<void>;
   handleControlsShuffle: () => void;
   handleControlsRepeat: () => void;
-  
-  // Helper functions
   formatControlsTime: (seconds: number) => string;
 }
 
@@ -62,97 +52,79 @@ interface QueueProviderProps {
 
 export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
   const { selectedVoiceId } = useLexioState();
-  const { 
-    audioRef, 
-    audioUrl, 
+  const {
+    audioRef,
     isPlaying,
     currentTime,
     duration,
     setIsMaximized,
     setIsPreloading,
-    generateWordTimings,
     setCurrentPlayingSection,
     setCurrentPlayingText,
     setCurrentWordIndex,
     setWordsData,
     setAudioUrl,
-    clearAudio
+    clearAudio,
+    generateWordTimings
   } = useAudio();
-  
-  // Queue state
+
   const [listeningQueue, setListeningQueue] = useState<QueueItem[]>([]);
   const [currentQueueIndex, setCurrentQueueIndex] = useState(-1);
   const [isQueuePlaying, setIsQueuePlaying] = useState(false);
-  
-  // Queue controls state
   const [controlsPlaying, setControlsPlaying] = useState(false);
   const [controlsProgress, setControlsProgress] = useState(0);
   const [controlsCurrentTime, setControlsCurrentTime] = useState(0);
   const [controlsShuffle, setControlsShuffle] = useState(false);
   const [controlsRepeat, setControlsRepeat] = useState(false);
+  
+  // Persistent content backup to prevent "No content available" flashing
+  const [lastKnownContent, setLastKnownContent] = useState<string>('');
 
-  // Helper function to check if an item is in the queue
   const isInQueue = useCallback((itemId: string) => {
     return listeningQueue.some(item => item.id === itemId);
   }, [listeningQueue]);
 
-  // Queue management functions
   const addToQueue = useCallback((item: QueueItem) => {
+    // Validate item content
+    if (!item.content || item.content.trim().length === 0) {
+      console.error('❌ Attempted to add queue item with no content:', item);
+      return;
+    }
+    
+    // Validate required fields
+    if (!item.id || !item.title) {
+      console.error('❌ Queue item missing required fields:', item);
+      return;
+    }
+    
+    console.log('✅ Adding to queue:', {
+      id: item.id,
+      title: item.title,
+      contentLength: item.content.length,
+      contentPreview: item.content.substring(0, 100) + (item.content.length > 100 ? '...' : '')
+    });
+    
     setListeningQueue(prev => {
-      if (prev.find(qItem => qItem.id === item.id)) return prev;
-      console.log(`➕ Adding "${item.title}" to queue`);
-      return [...prev, item];
+      // Check if item already exists
+      if (prev.find(qItem => qItem.id === item.id)) {
+        console.log('ℹ️ Item already in queue:', item.id);
+        return prev;
+      }
+      
+      const newQueue = [...prev, item];
+      console.log('📝 Queue updated, new length:', newQueue.length);
+      return newQueue;
     });
   }, []);
 
-  const removeFromQueue = useCallback((id: string) => {
-    setListeningQueue(prev => {
-      const removedItem = prev.find(item => item.id === id);
-      const newQueue = prev.filter(item => item.id !== id);
-      
-      if (removedItem) {
-        console.log(`➖ Removing "${removedItem.title}" from queue`);
-      }
-      
-      if (newQueue.length === 0) {
-        stopQueuePlayback();
-      } else if (isQueuePlaying) {
-        const removedItemIndex = prev.findIndex(item => item.id === id);
-        if (removedItemIndex === currentQueueIndex) {
-          if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.currentTime = 0;
-          }
-          if (audioUrl) {
-            clearAudio();
-          }
-          
-          if (currentQueueIndex >= newQueue.length) {
-            setCurrentQueueIndex(newQueue.length - 1);
-          }
-          
-          setCurrentPlayingSection(null);
-          setCurrentPlayingText('');
-          setCurrentWordIndex(-1);
-          setWordsData([]);
-          setControlsPlaying(false);
-        } else if (removedItemIndex < currentQueueIndex) {
-          setCurrentQueueIndex(currentQueueIndex - 1);
-        }
-      }
-      
-      return newQueue;
-    });
-  }, [isQueuePlaying, currentQueueIndex, audioRef, audioUrl, clearAudio, setCurrentPlayingSection, setCurrentPlayingText, setCurrentWordIndex, setWordsData]);
-
   const stopQueuePlayback = useCallback(() => {
+    console.log('🛑 stopQueuePlayback called - this will clear audio!');
+    
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-    
     clearAudio();
-    
     setIsQueuePlaying(false);
     setCurrentQueueIndex(-1);
     setCurrentPlayingSection(null);
@@ -162,314 +134,276 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     setControlsPlaying(false);
     setControlsProgress(0);
     setControlsCurrentTime(0);
-    // setIsMaximized(false); // Removed to prevent abrupt UI collapse when queue ends or is manually stopped
     setIsPreloading(false);
-  }, [audioRef, clearAudio, setCurrentPlayingSection, setCurrentPlayingText, setCurrentWordIndex, setWordsData, setIsMaximized, setIsPreloading]);
+  }, [audioRef, clearAudio, setIsPreloading, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData]);
+
+  const removeFromQueue = useCallback((id: string) => {
+    setListeningQueue(prev => {
+      const newQueue = prev.filter(item => item.id !== id);
+      if (newQueue.length === 0) stopQueuePlayback();
+      return newQueue;
+    });
+  }, [stopQueuePlayback]);
 
   const clearQueue = useCallback(() => {
     stopQueuePlayback();
     setListeningQueue([]);
   }, [stopQueuePlayback]);
 
-  // Ultra-smooth queue playback
-  const playQueue = useCallback(async () => {
-    if (listeningQueue.length === 0) return;
+  const playQueueItem = useCallback(async (index: number) => {
+    if (index < 0 || index >= listeningQueue.length) {
+      console.error('❌ Invalid queue index:', index, 'Queue length:', listeningQueue.length);
+      return;
+    }
     
-    const startIndex = currentQueueIndex >= 0 ? currentQueueIndex : 0;
-    const firstItem = listeningQueue[startIndex];
+    const item = listeningQueue[index];
     
-    console.log('🚀 Queue: Starting playback for:', firstItem.title);
-    console.log('🚀 Queue: Content preview:', firstItem.content.slice(0, 100) + '...');
+    // Debug logging to understand the issue
+    console.log('🎵 Playing queue item:', {
+      index,
+      id: item.id,
+      title: item.title,
+      contentLength: item.content?.length || 0,
+      hasContent: Boolean(item.content && item.content.trim().length > 0)
+    });
     
-    // Set basic state and content immediately for instant display
-    setIsQueuePlaying(true);
-    setCurrentQueueIndex(startIndex);
-    setCurrentPlayingText(firstItem.content);
-    setCurrentPlayingSection(firstItem.id as any);
+    // Validate content before proceeding
+    if (!item.content || item.content.trim().length === 0) {
+      console.error('❌ Queue item has no content:', item);
+      setIsPreloading(false);
+      return;
+    }
+    
+    // Clean up current audio properly
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      
+      // Clean up the old audio URL
+      if (audioRef.current.src) {
+        cleanupAudioUrl(audioRef.current.src);
+        audioRef.current.src = '';
+      }
+    }
+    
+    // Reset all audio-related state
+    setAudioUrl(null);
     setCurrentWordIndex(-1);
+    setWordsData([]);
+    setIsPreloading(true);
+    setControlsPlaying(false);
+    setControlsProgress(0);
+    setControlsCurrentTime(0);
     
-    // Generate initial timings with estimated duration for immediate display
-    const estimatedDuration = estimateTextDuration(firstItem.content);
-    const initialTimings = generateWordTimings(firstItem.content, estimatedDuration);
-    setWordsData(initialTimings);
+    // Set up new item - ensure state is set synchronously
+    setIsQueuePlaying(true);
+    setCurrentQueueIndex(index);
+    setCurrentPlayingSection(item.id as any);
     
-    // Since maximization is handled by handleControlsPlayPause, just clear preloading
-    setIsPreloading(false);
+    console.log('🔍 Setting currentPlayingText:', {
+      contentLength: item.content.length,
+      contentPreview: item.content.substring(0, 100) + '...'
+    });
+    
+    // Set the text content first and backup
+    setCurrentPlayingText(item.content);
+    setLastKnownContent(item.content); // Backup to prevent content loss
     
     try {
-      console.log('🎤 Queue: Generating TTS for voice:', selectedVoiceId);
-      const result = await generateSpeech(firstItem.content, {}, selectedVoiceId);
-      console.log('🎤 Queue: TTS Generated successfully:', result.audioUrl ? 'Got audio URL' : 'No audio URL');
-      setAudioUrl(result.audioUrl);
+      // Generate initial placeholder word timings for immediate display
+      const estimatedDuration = estimateTextDuration(item.content);
+      const initialTimings = generateWordTimings(item.content, estimatedDuration);
+      setWordsData(initialTimings);
       
-      if (process.env.NODE_ENV === 'development') {
-        // Update cache stats
+      console.log('🗣️ Generating speech for content length:', item.content.length);
+      
+      // Generate audio
+      const result = await generateSpeech(item.content, {}, selectedVoiceId);
+      
+      if (!result.audioUrl) {
+        throw new Error("No audio URL generated");
       }
       
-      // Load and prepare audio in the background
+      console.log('✅ Audio generated successfully');
+      
+      // Set the new audio URL
+      setAudioUrl(result.audioUrl);
+      
+      // Wait for the audio element to update
       if (audioRef.current) {
+        audioRef.current.src = result.audioUrl;
         audioRef.current.load();
         
-        const waitForAudioReady = () => {
-          return new Promise<void>((resolve) => {
-            const checkReady = () => {
-              if (audioRef.current && audioRef.current.readyState >= 2) {
-                // Update word timings with actual duration
-                const actualDuration = audioRef.current.duration;
-                if (actualDuration && actualDuration > 0) {
-                  const actualTimings = generateWordTimings(firstItem.content, actualDuration);
-                  setWordsData(actualTimings);
-                  console.log('📝 Queue: Updated word timings with actual duration:', actualDuration);
-                }
-                resolve();
-              } else {
-                setTimeout(checkReady, 50);
-              }
-            };
-            checkReady();
-          });
+        // Handle metadata loading to update word timings with actual duration
+        const handleLoadedMetadata = () => {
+          if (audioRef.current && audioRef.current.duration) {
+            console.log('📏 Audio loaded, duration:', audioRef.current.duration);
+            const actualTimings = generateWordTimings(item.content, audioRef.current.duration);
+            setWordsData(actualTimings);
+          }
         };
         
-        await waitForAudioReady();
+        const handleCanPlay = async () => {
+          setIsPreloading(false);
+          try {
+            await audioRef.current!.play();
+            setControlsPlaying(true);
+            console.log('▶️ Playback started successfully');
+          } catch (playError) {
+            console.error('❌ Error starting playback:', playError);
+            setControlsPlaying(false);
+            setIsPreloading(false);
+          }
+        };
         
-        console.log('📺 Queue: Audio ready, starting playback');
+        // Add event listeners
+        audioRef.current.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+        audioRef.current.addEventListener('canplay', handleCanPlay, { once: true });
         
-        try {
-          await audioRef.current.play();
-          setControlsPlaying(true);
-        } catch (playError) {
-          console.log('⚠️ Queue: Playback will start when user interacts');
+        // Set up error handling
+        audioRef.current.addEventListener('error', (e) => {
+          console.error('❌ Audio error:', e);
+          setIsPreloading(false);
           setControlsPlaying(false);
-        }
+        }, { once: true });
       }
       
     } catch (error) {
-      console.error('❌ Queue: Error during playback setup:', error);
-      setIsQueuePlaying(false);
-      setCurrentQueueIndex(-1);
+      console.error('❌ Error generating/playing audio:', error);
       setIsPreloading(false);
+      setControlsPlaying(false);
+      
+      // Don't stop the entire queue, just this item failed
+      // But make sure the text is still displayed even if audio fails
+      const estimatedDuration = estimateTextDuration(item.content);
+      const fallbackTimings = generateWordTimings(item.content, estimatedDuration);
+      setWordsData(fallbackTimings);
     }
-  }, [listeningQueue, estimateTextDuration, generateWordTimings, setIsPreloading, setIsQueuePlaying, setIsMaximized, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, selectedVoiceId, audioRef, currentQueueIndex]);
+  }, [listeningQueue, selectedVoiceId, audioRef, setIsQueuePlaying, setCurrentQueueIndex, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, setAudioUrl, setIsPreloading, setControlsPlaying, generateWordTimings]);
 
-  // Handle automatic queue progression
+  const playQueue = useCallback(async () => {
+    if (listeningQueue.length === 0) return;
+    const startIndex = currentQueueIndex >= 0 ? currentQueueIndex : 0;
+    await playQueueItem(startIndex);
+  }, [listeningQueue.length, currentQueueIndex, playQueueItem]);
+
   const playNextInQueue = useCallback(async () => {
-    if (!isQueuePlaying || currentQueueIndex === -1) return;
-    
-    if (controlsRepeat) {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        try {
-          await audioRef.current.play();
-          setControlsPlaying(true);
-        } catch (playError) {
-          console.debug('Play interrupted during repeat:', playError);
-          setControlsPlaying(false);
-        }
-      }
-      return;
-    }
+    console.log('⏭️ Auto-playing next in queue:', {
+      currentIndex: currentQueueIndex,
+      queueLength: listeningQueue.length
+    });
     
     const nextIndex = currentQueueIndex + 1;
     if (nextIndex >= listeningQueue.length) {
-      console.log('🏁 Queue finished: Clearing all state');
+      console.log('🏁 End of queue reached, stopping playback');
       stopQueuePlayback();
-      setIsMaximized(false); // collapse UI when queue finishes
       return;
     }
     
-    const nextItem = listeningQueue[nextIndex];
-    const estimatedDuration = estimateTextDuration(nextItem.content);
-    const timings = generateWordTimings(nextItem.content, estimatedDuration);
-    
-    setCurrentQueueIndex(nextIndex);
-    setIsMaximized(true); // Ensure maximization stays active during queue transitions
-    setCurrentPlayingText(nextItem.content);
-    setCurrentPlayingSection(nextItem.id as any);
-    setCurrentWordIndex(-1);
-    setWordsData(timings);
+    console.log('▶️ Auto-advancing to index:', nextIndex);
+    setIsMaximized(true);
     
     try {
-      if (audioUrl) {
-        clearAudio();
-      }
-      
-      const result = await generateSpeech(nextItem.content, {}, selectedVoiceId);
-      setAudioUrl(result.audioUrl);
-      
-      if (process.env.NODE_ENV === 'development') {
-        // Update cache stats
-      }
-      
-      setControlsCurrentTime(0);
-      setControlsProgress(0);
-      
-      if (audioRef.current) {
-        audioRef.current.load();
-        try {
-          await audioRef.current.play();
-          setControlsPlaying(true);
-        } catch (playError) {
-          console.debug('Play interrupted during queue progression:', playError);
-          setControlsPlaying(false);
-        }
-      }
+      await playQueueItem(nextIndex);
     } catch (error) {
-      console.error('Error playing next queue item:', error);
-      setIsQueuePlaying(false);
-      setCurrentQueueIndex(-1);
-      setControlsPlaying(false);
+      console.error('❌ Error auto-playing next item:', error);
     }
-  }, [isQueuePlaying, currentQueueIndex, listeningQueue, controlsRepeat, audioRef, audioUrl, clearAudio, estimateTextDuration, generateWordTimings, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, setAudioUrl, selectedVoiceId, stopQueuePlayback, setIsMaximized]);
+  }, [currentQueueIndex, listeningQueue.length, stopQueuePlayback, setIsMaximized, playQueueItem]);
 
-  // Simplified and robust play/pause control
   const handleControlsPlayPause = useCallback(async () => {
-    console.log('🎮 Controls: Play button clicked', {
+    console.log('🎮 handleControlsPlayPause called:', {
       queueLength: listeningQueue.length,
-      hasAudioUrl: !!audioUrl,
       isQueuePlaying,
-      isPlaying,
-      currentQueueIndex
+      isPlaying
     });
+    
+    if (listeningQueue.length === 0) return;
 
-    // Priority 1: Start queue playback if queue has items and not currently playing
-    if (listeningQueue.length > 0 && !isQueuePlaying) {
-      console.log('🎮 Controls: Starting queue playback and maximizing');
+    if (!isQueuePlaying) {
+      console.log('🎮 Starting queue playback');
       setIsMaximized(true);
       await playQueue();
       return;
     }
 
-    // Priority 2: Handle queue or individual audio playback
     if (audioRef.current) {
-      try {
-        if (isPlaying) {
-          console.log('🎮 Controls: Pausing audio');
-          audioRef.current.pause();
-        } else {
-          console.log('🎮 Controls: Playing audio');
-          // Maximize when resuming playback
-          setIsMaximized(true);
+      if (isPlaying) {
+        console.log('🎮 Pausing audio');
+        audioRef.current.pause();
+      } else {
+        console.log('🎮 Playing audio');
+        try {
           await audioRef.current.play();
+        } catch {
+          setControlsPlaying(false);
         }
-      } catch (error) {
-        console.warn('Audio playback action failed:', error);
-        // Reset states on error
-        setControlsPlaying(false);
       }
     }
-  }, [listeningQueue.length, audioUrl, isQueuePlaying, audioRef, isPlaying, playQueue, setIsMaximized, currentQueueIndex]);
+  }, [listeningQueue.length, isQueuePlaying, isPlaying, audioRef, setIsMaximized, playQueue]);
 
   const handleControlsPrevious = useCallback(async () => {
-    if (!isQueuePlaying || currentQueueIndex <= 0) return;
+    console.log('⏮️ Previous button clicked:', {
+      isQueuePlaying,
+      currentQueueIndex,
+      queueLength: listeningQueue.length,
+      canGoPrevious: currentQueueIndex > 0
+    });
+    
+    if (!isQueuePlaying) {
+      console.log('❌ Cannot go previous: queue not playing');
+      return;
+    }
+    
+    if (currentQueueIndex <= 0) {
+      console.log('❌ Cannot go previous: already at first item');
+      return;
+    }
     
     const prevIndex = currentQueueIndex - 1;
-    const prevItem = listeningQueue[prevIndex];
-    const estimatedDuration = estimateTextDuration(prevItem.content);
-    const timings = generateWordTimings(prevItem.content, estimatedDuration);
-    
-    setCurrentQueueIndex(prevIndex);
-    setIsMaximized(true); // Maintain maximization during manual navigation
-    setCurrentPlayingText(prevItem.content);
-    setCurrentPlayingSection(prevItem.id as any);
-    setCurrentWordIndex(-1);
-    setWordsData(timings);
+    console.log('▶️ Moving to previous item at index:', prevIndex);
     
     try {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      }
-      
-      if (audioUrl) {
-        clearAudio();
-      }
-      
-      const result = await generateSpeech(prevItem.content, {}, selectedVoiceId);
-      setAudioUrl(result.audioUrl);
-      
-      if (audioRef.current) {
-        audioRef.current.load();
-        try {
-          await audioRef.current.play();
-          setControlsPlaying(true);
-        } catch (playError) {
-          console.debug('Play interrupted, will start when user interacts:', playError);
-          setControlsPlaying(false);
-        }
-      }
+      await playQueueItem(prevIndex);
     } catch (error) {
-      console.error('Error playing previous queue item:', error);
+      console.error('❌ Error playing previous item:', error);
     }
-  }, [isQueuePlaying, currentQueueIndex, listeningQueue, estimateTextDuration, generateWordTimings, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, audioRef, audioUrl, clearAudio, setAudioUrl, selectedVoiceId]);
+  }, [isQueuePlaying, currentQueueIndex, listeningQueue.length, playQueueItem]);
 
   const handleControlsNext = useCallback(async () => {
-    if (!isQueuePlaying || currentQueueIndex >= listeningQueue.length - 1) return;
+    console.log('⏭️ Next button clicked:', {
+      isQueuePlaying,
+      currentQueueIndex,
+      queueLength: listeningQueue.length,
+      canGoNext: currentQueueIndex < listeningQueue.length - 1
+    });
+    
+    if (!isQueuePlaying) {
+      console.log('❌ Cannot go next: queue not playing');
+      return;
+    }
+    
+    if (currentQueueIndex >= listeningQueue.length - 1) {
+      console.log('❌ Cannot go next: already at last item');
+      return;
+    }
     
     const nextIndex = currentQueueIndex + 1;
-    const nextItem = listeningQueue[nextIndex];
-    const estimatedDuration = estimateTextDuration(nextItem.content);
-    const timings = generateWordTimings(nextItem.content, estimatedDuration);
-    
-    setCurrentQueueIndex(nextIndex);
-    setIsMaximized(true); // Maintain maximization during manual navigation
-    setCurrentPlayingText(nextItem.content);
-    setCurrentPlayingSection(nextItem.id as any);
-    setCurrentWordIndex(-1);
-    setWordsData(timings);
+    console.log('▶️ Moving to next item at index:', nextIndex);
     
     try {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      }
-      
-      if (audioUrl) {
-        clearAudio();
-      }
-      
-      const result = await generateSpeech(nextItem.content, {}, selectedVoiceId);
-      setAudioUrl(result.audioUrl);
-      
-      if (audioRef.current) {
-        audioRef.current.load();
-        try {
-          await audioRef.current.play();
-          setControlsPlaying(true);
-        } catch (playError) {
-          console.debug('Play interrupted, will start when user interacts:', playError);
-          setControlsPlaying(false);
-        }
-      }
+      await playQueueItem(nextIndex);
     } catch (error) {
-      console.error('Error playing next queue item:', error);
+      console.error('❌ Error playing next item:', error);
     }
-  }, [isQueuePlaying, currentQueueIndex, listeningQueue, estimateTextDuration, generateWordTimings, setCurrentPlayingText, setCurrentPlayingSection, setCurrentWordIndex, setWordsData, audioRef, audioUrl, clearAudio, setAudioUrl, selectedVoiceId]);
+  }, [isQueuePlaying, currentQueueIndex, listeningQueue.length, playQueueItem]);
 
   const handleControlsShuffle = useCallback(() => {
-    if (listeningQueue.length === 0) return;
-    
-    setControlsShuffle(!controlsShuffle);
-    
-    if (!controlsShuffle) {
-      const currentItem = listeningQueue[currentQueueIndex];
-      const otherItems = listeningQueue.filter((_, index) => index !== currentQueueIndex);
-      
-      for (let i = otherItems.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [otherItems[i], otherItems[j]] = [otherItems[j], otherItems[i]];
-      }
-      
-      const shuffledQueue = currentQueueIndex !== -1 ? [currentItem, ...otherItems] : otherItems;
-      setListeningQueue(shuffledQueue);
-      if (currentQueueIndex !== -1) {
-        setCurrentQueueIndex(0);
-      }
-    }
-  }, [listeningQueue, controlsShuffle, currentQueueIndex]);
+    setControlsShuffle(prev => !prev);
+  }, []);
 
   const handleControlsRepeat = useCallback(() => {
-    setControlsRepeat(!controlsRepeat);
-  }, [controlsRepeat]);
+    setControlsRepeat(prev => !prev);
+  }, []);
 
   const formatControlsTime = useCallback((seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -477,9 +411,9 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }, []);
 
-  // Sync control progress with actual audio playback
+  // Update controls state based on audio state
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
+    const id = setTimeout(() => {
       if (isQueuePlaying && audioRef.current && !isNaN(currentTime) && !isNaN(duration)) {
         setControlsCurrentTime(currentTime);
         setControlsProgress(duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0);
@@ -490,71 +424,67 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
         setControlsPlaying(false);
       }
     }, 50);
+    return () => clearTimeout(id);
+  }, [isQueuePlaying, currentTime, duration, isPlaying]);
 
-    return () => clearTimeout(timeoutId);
-  }, [isQueuePlaying, currentTime, duration, isPlaying, audioRef]);
-
-  // Monitor queue length and auto-clear
+  // Clean up queue when empty
   useEffect(() => {
-    if (listeningQueue.length === 0 && (isQueuePlaying || audioUrl)) {
-      console.log('🧹 Queue empty: Auto-clearing now playing state');
+    console.log('🧹 Queue cleanup effect triggered:', {
+      queueLength: listeningQueue.length,
+      isQueuePlaying
+    });
+    
+    if (listeningQueue.length === 0 && isQueuePlaying) {
+      console.log('🧹 Queue is empty but still playing, stopping playback');
       stopQueuePlayback();
     }
-  }, [listeningQueue.length, isQueuePlaying, audioUrl, stopQueuePlayback]);
+  }, [listeningQueue.length, isQueuePlaying, stopQueuePlayback]);
 
-  // Handle audio end for queue progression
+  // Auto-play next item when current item ends
   useEffect(() => {
     const audioElement = audioRef.current;
     if (!audioElement) return;
-
+    
     const handleAudioEnd = () => {
+      console.log('🎵 Audio ended, checking if should play next');
       if (isQueuePlaying) {
+        console.log('🎵 Auto-playing next item in queue');
         playNextInQueue();
       }
     };
-
+    
     audioElement.addEventListener('ended', handleAudioEnd);
     return () => audioElement.removeEventListener('ended', handleAudioEnd);
-  }, [isQueuePlaying, playNextInQueue, audioRef]);
-
-  const value: QueueContextType = {
-    // Queue state
-    listeningQueue,
-    currentQueueIndex,
-    isQueuePlaying,
-    
-    // Queue controls state
-    controlsPlaying,
-    controlsProgress,
-    controlsCurrentTime,
-    controlsShuffle,
-    controlsRepeat,
-    
-    // Queue management
-    addToQueue,
-    removeFromQueue,
-    clearQueue,
-    isInQueue,
-    
-    // Queue playback
-    playQueue,
-    stopQueuePlayback,
-    playNextInQueue,
-    
-    // Queue controls
-    handleControlsPlayPause,
-    handleControlsPrevious,
-    handleControlsNext,
-    handleControlsShuffle,
-    handleControlsRepeat,
-    
-    // Helper functions
-    formatControlsTime,
-  };
+  }, [isQueuePlaying, playNextInQueue]);
 
   return (
-    <QueueContext.Provider value={value}>
+    <QueueContext.Provider
+      value={{
+        listeningQueue,
+        currentQueueIndex,
+        isQueuePlaying,
+        controlsPlaying,
+        controlsProgress,
+        controlsCurrentTime,
+        controlsShuffle,
+        controlsRepeat,
+        lastKnownContent,
+        addToQueue,
+        removeFromQueue,
+        clearQueue,
+        isInQueue,
+        playQueue,
+        stopQueuePlayback,
+        playNextInQueue,
+        handleControlsPlayPause,
+        handleControlsPrevious,
+        handleControlsNext,
+        handleControlsShuffle,
+        handleControlsRepeat,
+        formatControlsTime
+      }}
+    >
       {children}
     </QueueContext.Provider>
   );
-}; 
+};

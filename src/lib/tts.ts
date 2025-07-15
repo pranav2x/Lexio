@@ -376,8 +376,14 @@ export async function generateSpeech(
 ): Promise<TTSResult> {
   // Validate text
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    console.error('❌ generateSpeech called with invalid text:', { text, type: typeof text, length: text?.length });
     throw new Error('Valid text is required for speech generation');
   }
+
+  console.log('🗣️ generateSpeech called with:', {
+    textLength: text.length,
+    selectedVoiceId
+  });
 
   // Merge options with defaults, with voice override if provided
   const config = { 

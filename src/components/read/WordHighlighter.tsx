@@ -7,7 +7,6 @@ interface WordData {
   index: number;
   startTime: number;
   endTime: number;
-  isWhitespace: boolean;
 }
 
 interface WordHighlighterProps {
@@ -15,9 +14,10 @@ interface WordHighlighterProps {
   currentWordIndex: number;
   isPlaying: boolean;
   content: string;
-  onWordClick: (wordIndex: number) => void;
+  onWordClick: (index: number) => void;
+  highlightedWordRef?: React.RefObject<HTMLSpanElement | null>;
+  textSize?: 'sm' | 'md' | 'lg';
   compact?: boolean;
-  textSize?: 'sm' | 'lg';
 }
 
 const WordHighlighter: React.FC<WordHighlighterProps> = ({
@@ -26,79 +26,100 @@ const WordHighlighter: React.FC<WordHighlighterProps> = ({
   isPlaying,
   content,
   onWordClick,
-  compact = false,
-  textSize = 'sm'
+  highlightedWordRef,
+  textSize = 'md',
+  compact = false
 }) => {
-  const activeWordRef = useRef<HTMLSpanElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Fallback mode: show static text when wordsData is empty but content exists
+  const isFallbackMode = !wordsData.length && content.length > 0;
 
-  const baseClasses = compact 
-    ? "text-sm leading-relaxed font-mono-enhanced" 
-    : textSize === 'lg' 
-      ? "text-lg leading-9 font-mono-enhanced text-left space-y-2" 
-      : "text-sm leading-relaxed font-mono-enhanced";
+  const textSizeClasses = {
+    sm: 'text-sm',
+    md: 'text-base',
+    lg: 'text-lg'
+  };
 
+  const lineHeightClasses = {
+    sm: 'leading-6',
+    md: 'leading-7',
+    lg: 'leading-9'
+  };
+
+  // Auto-scroll to highlighted word
   useEffect(() => {
-    if (activeWordRef.current && currentWordIndex !== -1) {
-      activeWordRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-        inline: 'nearest'
-      });
+    if (highlightedWordRef?.current && scrollContainerRef.current && !isFallbackMode) {
+      const container = scrollContainerRef.current;
+      const highlighted = highlightedWordRef.current;
+      
+      const containerRect = container.getBoundingClientRect();
+      const highlightedRect = highlighted.getBoundingClientRect();
+      
+      if (highlightedRect.bottom > containerRect.bottom || highlightedRect.top < containerRect.top) {
+        highlighted.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }
     }
-  }, [currentWordIndex]);
+  }, [currentWordIndex, isFallbackMode]);
 
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development' && currentWordIndex !== -1 && wordsData[currentWordIndex]) {
-      console.log(`🎯 WordHighlighter: highlighting word ${currentWordIndex}: "${wordsData[currentWordIndex].word}" (playing: ${isPlaying})`);
-    }
-  }, [currentWordIndex, isPlaying, wordsData]);
-
-  return (
-    <div className={baseClasses} style={textSize === 'lg' ? { wordSpacing: '0.2em' } : {}}>
-      {wordsData.length > 0 ? (
-        wordsData.map((wordData, index) => {
-          const isActive = currentWordIndex === index;
-          if (wordData.isWhitespace) {
-            return (
-              <span
-                key={index}
-                className="inline-block opacity-50 select-none"
-              >
-                {wordData.word}
-              </span>
-            );
-          }
-          return (
-            <span
-              key={index}
-              ref={isActive ? activeWordRef : null}
-              className={`inline-block cursor-pointer rounded transition-all duration-150 px-${compact ? '1' : '1'} py-${compact ? '0.5' : '1'} ${compact ? '' : 'mx-0.5'}
-                ${isActive
-                  ? 'text-white font-bold bg-white/30 px-2 py-1 rounded-md shadow-lg transform scale-105 animate-highlight border-2 border-white/50'
-                  : currentWordIndex > index
-                    ? 'text-white/60'
-                    : 'text-white/80 hover:text-white/90 hover:bg-white/10'
-                }`}
-              onClick={() => onWordClick(index)}
-            >
-              {wordData.word}
-            </span>
-          );
-        })
-      ) : (
-        <div className="text-white/80">
-          {content.split(/(\s+)/).map((part, index) => (
-            <span
-              key={index}
-              className={part.trim() ? `cursor-pointer rounded transition-all duration-150 px-${compact ? '1' : '1'} py-${compact ? '0.5' : '1'} ${compact ? '' : 'mx-0.5'} hover:text-white/90 hover:bg-white/10` : 'inline-block opacity-50 select-none'}
-            >
-              {part}
-            </span>
-          ))}
+  if (isFallbackMode) {
+    // Fallback mode: render static text without highlighting
+    return (
+      <div 
+        ref={scrollContainerRef}
+        className={`text-white/90 ${textSizeClasses[textSize]} ${lineHeightClasses[textSize]} font-mono-enhanced text-left select-text ${
+          compact ? 'max-h-32 overflow-y-auto' : ''
+        }`}
+      >
+        <div className="text-white/60 text-xs mb-2 font-mono-enhanced">
+          {isPlaying ? '🎵 Loading word timing data...' : '📝 Ready to play'}
         </div>
-      )}
+        {content.split(/(\s+)/).map((part, idx) => (
+          <span 
+            key={idx} 
+            className="text-white/80 hover:text-white/90 transition-colors cursor-text"
+          >
+            {part}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  // Normal mode: render with word highlighting
+  return (
+    <div 
+      ref={scrollContainerRef}
+      className={`text-white/90 ${textSizeClasses[textSize]} ${lineHeightClasses[textSize]} font-mono-enhanced text-left select-text ${
+        compact ? 'max-h-32 overflow-y-auto' : ''
+      }`}
+    >
+      {wordsData.map((wordData, index) => {
+        const isCurrentWord = index === currentWordIndex && isPlaying;
+        const isClickable = !compact;
+        
+        return (
+          <span
+            key={index}
+            ref={isCurrentWord ? highlightedWordRef : undefined}
+            className={`transition-all duration-150 ${
+              isCurrentWord
+                ? 'bg-white/20 text-white shadow-sm rounded-sm px-1 neon-glow'
+                : 'text-white/80 hover:text-white/90'
+            } ${
+              isClickable ? 'cursor-pointer hover:bg-white/10 rounded-sm px-0.5' : ''
+            }`}
+            onClick={() => isClickable && onWordClick(index)}
+          >
+            {wordData.word}
+          </span>
+        );
+      })}
     </div>
   );
 };
 
-export default WordHighlighter; 
+export default WordHighlighter;
