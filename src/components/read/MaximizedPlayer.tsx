@@ -51,6 +51,19 @@ const MaximizedPlayer: React.FC = () => {
   const contentRef = useRef<HTMLDivElement>(null);
   const speedOptions = [0.75, 1, 1.25, 1.5];
 
+  // Debug logging for word highlighting
+  console.log('🔍 MaximizedPlayer Debug:', {
+    isMaximized,
+    currentPlayingText: currentPlayingText ? `"${currentPlayingText.slice(0, 50)}..."` : 'null',
+    wordsDataLength: wordsData.length,
+    currentWordIndex,
+    isPlaying,
+    currentTime,
+    duration,
+    isQueuePlaying,
+    currentQueueIndex
+  });
+
   if (!isMaximized) {
     return null;
   }

@@ -179,6 +179,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     const firstItem = listeningQueue[startIndex];
     
     console.log('🚀 Queue: Starting playback for:', firstItem.title);
+    console.log('🚀 Queue: Content preview:', firstItem.content.slice(0, 100) + '...');
     
     // Set basic state and content immediately for instant display
     setIsQueuePlaying(true);
@@ -196,7 +197,9 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     setIsPreloading(false);
     
     try {
+      console.log('🎤 Queue: Generating TTS for voice:', selectedVoiceId);
       const result = await generateSpeech(firstItem.content, {}, selectedVoiceId);
+      console.log('🎤 Queue: TTS Generated successfully:', result.audioUrl ? 'Got audio URL' : 'No audio URL');
       setAudioUrl(result.audioUrl);
       
       if (process.env.NODE_ENV === 'development') {

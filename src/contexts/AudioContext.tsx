@@ -358,15 +358,18 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
     }
   }, [audioUrl, playbackRate]);
 
-  // Real-time TTS-synced word index updates (50ms intervals)
+  // Real-time TTS-synced word index updates (30ms intervals)
   useEffect(() => {
+    console.log('🔤 Word highlighting useEffect:', { isPlaying, wordsDataLength: wordsData.length, currentWordIndex });
     if (isPlaying && wordsData.length > 0) {
+      console.log('🔤 Starting word highlighting interval - wordsData length:', wordsData.length);
       const interval = setInterval(() => {
         const currentAudioTime = audioRef.current?.currentTime || 0;
         const newWordIndex = findCurrentWordIndex(currentAudioTime);
         
         // Update word index if it changed (including -1 to handle gaps)
         if (newWordIndex !== currentWordIndex) {
+          console.log(`🔤 Word index changed: ${currentWordIndex} -> ${newWordIndex} at ${currentAudioTime.toFixed(2)}s`);
           setCurrentWordIndex(newWordIndex);
           
           // Debug logging for word highlighting
@@ -468,9 +471,14 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
           }}
           onLoadedData={() => {
             if (audioRef.current && audioRef.current.duration > 0 && !isNaN(audioRef.current.duration)) {
+              console.log('🎵 Audio: onLoadedData - duration:', audioRef.current.duration);
               if (currentPlayingText) {
+                console.log('🎵 Audio: Generating word timings for text length:', currentPlayingText.length);
                 const actualTimings = generateWordTimings(currentPlayingText, audioRef.current.duration);
+                console.log('🎵 Audio: Generated', actualTimings.length, 'word timings');
                 setWordsData(actualTimings);
+              } else {
+                console.log('🎵 Audio: No currentPlayingText available for word timings');
               }
             }
           }}
@@ -484,8 +492,10 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
             }
           }}
           onPlay={() => {
+            console.log('🎵 Audio: onPlay event - wordsData length:', wordsData.length);
             setIsPlaying(true);
             if (currentWordIndex === -1 && wordsData.length > 0) {
+              console.log('🎵 Audio: Setting initial word index to 0');
               setCurrentWordIndex(0);
             }
           }}
