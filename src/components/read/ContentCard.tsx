@@ -45,7 +45,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
   additionalSectionsCount = 0,
   onClick
 }) => {
-  const { currentPlayingSection, generateAudioForSection, handlePlayPause, isGeneratingAudio, clearAudio } = useAudio();
+  const { currentPlayingSection, playSectionDirectly, isGeneratingAudio } = useAudio();
 
   const isPlaying = currentPlayingSection === id;
 
@@ -59,17 +59,9 @@ const ContentCard: React.FC<ContentCardProps> = ({
     }
 
     try {
-      // Clear any existing audio first
-      clearAudio();
-      
-      console.log('🎯 Starting direct audio generation...');
-      await generateAudioForSection(id as PlayingSection, content);
-      console.log('✅ Audio generation completed, starting playback...');
-      
-      // Start playing immediately after generation
-      setTimeout(() => {
-        handlePlayPause();
-      }, 200);
+      console.log('🎯 Calling playSectionDirectly...');
+      await playSectionDirectly(id, content);
+      console.log('✅ Direct play completed');
     } catch (error) {
       console.error('❌ Error in direct play:', error);
     }

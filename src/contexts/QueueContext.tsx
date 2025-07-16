@@ -11,6 +11,8 @@ interface QueueItem {
   id: string;
   title: string;
   content: string;
+  error?: string | null; // Track audio generation errors
+  isLoading?: boolean; // Track loading state
 }
 
 interface QueueContextType {
@@ -147,6 +149,27 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     setListeningQueue([]);
   }, [stopQueuePlayback]);
 
+  // Clear any existing error state for a queue item
+  const clearItemError = useCallback((itemId: string) => {
+    setListeningQueue(prev => prev.map(item => 
+      item.id === itemId ? { ...item, error: null, isLoading: false } : item
+    ));
+  }, []);
+
+  // Set error state for a queue item
+  const setItemError = useCallback((itemId: string, error: string) => {
+    setListeningQueue(prev => prev.map(item => 
+      item.id === itemId ? { ...item, error, isLoading: false } : item
+    ));
+  }, []);
+
+  // Set loading state for a queue item
+  const setItemLoading = useCallback((itemId: string, isLoading: boolean) => {
+    setListeningQueue(prev => prev.map(item => 
+      item.id === itemId ? { ...item, isLoading, error: isLoading ? null : item.error } : item
+    ));
+  }, []);
+
   const playQueueItem = useCallback(async (index: number) => {
     if (index < 0 || index >= listeningQueue.length) {
       console.error('Invalid queue index:', index, 'Queue length:', listeningQueue.length);
@@ -169,8 +192,10 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       return;
     }
     
-    // Step 1: Set loading state immediately
+    // Step 1: Clear any existing error and set loading state immediately
     console.log('🔥 Step 1: Setting loading state');
+    clearItemError(item.id);
+    setItemLoading(item.id, true);
     setIsPreloading(true);
     
     // Step 2: Immediately set text content and backup (critical for UI consistency)
@@ -309,21 +334,24 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
         
         // Check for specific error types
         if (errorMessage.includes('429') || errorMessage.includes('too_many_concurrent_requests')) {
-          errorMessage = 'Rate limit exceeded. Too many requests in progress.';
+          errorMessage = 'Rate limit exceeded. Please try again shortly.';
           errorCode = '429';
           shouldRetry = true;
         } else if (errorMessage.includes('401') || errorMessage.includes('invalid_api_key')) {
-          errorMessage = 'Invalid API key. Please check your ElevenLabs API key configuration.';
+          errorMessage = 'API key error. Please check configuration.';
           errorCode = '401';
         } else if (errorMessage.includes('500')) {
           errorMessage = 'Server error. Please try again.';
           errorCode = '500';
           shouldRetry = true;
         } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
-          errorMessage = 'Network error. Please check your connection.';
+          errorMessage = 'Network error. Check your connection.';
           shouldRetry = true;
         }
       }
+      
+      // Set error state for this specific queue item (don't stop entire queue)
+      setItemError(item.id, errorMessage);
       
       console.error('❌ TTS Generation failed:', {
         error: errorMessage,
@@ -358,11 +386,6 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       setCurrentPlayingText(item.content);
       setLastKnownContent(item.content);
       
-      // For rate limit errors, show a user-friendly message
-      if (errorCode === '429') {
-        console.warn('⏰ Rate limit hit. Audio will be available when requests settle.');
-      }
-      
       // Set the audio URL to null and ensure preloading is stopped
       setAudioUrl(null);
       setIsPreloading(false);
@@ -377,13 +400,8 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
         errorType: errorCode,
         shouldRetry
       });
-      
-      // For retryable errors, we could add an auto-retry mechanism here
-      if (shouldRetry && errorCode === '429') {
-        console.log('🔄 Will allow manual retry for rate limit error');
-      }
     }
-  }, [listeningQueue, selectedVoiceId, audioRef, setIsQueuePlaying, setCurrentQueueIndex, setCurrentPlayingText, setCurrentPlayingSection, setWords, setAudioUrl, setIsPreloading, setControlsPlaying]);
+      }, [listeningQueue, selectedVoiceId, audioRef, setIsQueuePlaying, setCurrentQueueIndex, setCurrentPlayingText, setCurrentPlayingSection, setWords, setAudioUrl, setIsPreloading, setControlsPlaying, clearItemError, setItemError, setItemLoading, clearAudio]);
 
   const playQueue = useCallback(async () => {
     if (listeningQueue.length === 0) return;
@@ -421,18 +439,29 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       isQueuePlaying
     });
     
-    if (!isQueuePlaying || currentQueueIndex < 0 || currentQueueIndex >= listeningQueue.length) {
-      console.log('⚠️ Cannot retry: invalid queue state');
+    if (currentQueueIndex < 0 || currentQueueIndex >= listeningQueue.length) {
+      console.log('⚠️ Cannot retry: invalid queue index');
       return;
     }
     
+    const item = listeningQueue[currentQueueIndex];
+    if (!item) {
+      console.log('⚠️ Cannot retry: no item found at current index');
+      return;
+    }
+    
+    console.log('🔄 Retrying item:', { id: item.id, title: item.title, hasError: !!item.error });
+    
     try {
+      // Clear the error state before retrying
+      clearItemError(item.id);
       await playQueueItem(currentQueueIndex);
       console.log('✅ Retry successful');
     } catch (error) {
       console.error('❌ Retry failed:', error);
+      // Error state will be set by playQueueItem's catch block
     }
-  }, [currentQueueIndex, listeningQueue.length, isQueuePlaying, playQueueItem]);
+  }, [currentQueueIndex, listeningQueue, isQueuePlaying, playQueueItem, clearItemError]);
 
   const handleControlsPlayPause = useCallback(async () => {
     console.log('🎮🔥 PLAY BUTTON CLICKED - handleControlsPlayPause called:', {

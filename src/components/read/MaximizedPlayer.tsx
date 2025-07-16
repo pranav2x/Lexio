@@ -221,35 +221,89 @@ const MaximizedPlayer: React.FC = () => {
                   <div className="text-white/60 text-center font-mono-enhanced">
                     {isGeneratingAudio || isPreloading ? (
                       <>
-                        <div className="animate-spin h-6 w-6 border-b-2 border-white/30 mx-auto mb-2"></div>
-                        <div>Loading content...</div>
-                        <div className="text-xs text-white/40 mt-1">
-                          {isGeneratingAudio ? 'Generating audio...' : 'Preparing playback...'}
+                        <div className="animate-spin h-8 w-8 border-b-2 border-white/30 mx-auto mb-4"></div>
+                        <div className="text-lg mb-2">Preparing synchronized audio...</div>
+                        <div className="text-sm text-white/40">
+                          {isGeneratingAudio ? 'Generating audio with precise word timings...' : 'Loading audio for playback...'}
                         </div>
+                        {/* Show the last known content during loading to prevent blank screen */}
+                        {lastKnownContent && (
+                          <div className="mt-6 p-4 bg-white/5 rounded-lg max-w-4xl mx-auto">
+                            <div className="text-xs text-white/40 mb-2">Preview (loading audio...):</div>
+                            <div className="text-white/70 text-sm leading-relaxed">
+                              {lastKnownContent.substring(0, 300)}
+                              {lastKnownContent.length > 300 && '...'}
+                            </div>
+                          </div>
+                        )}
                       </>
                     ) : (
                       <>
-                        <div className="h-6 w-6 border-2 border-white/30 mx-auto mb-2 rounded"></div>
-                        <div className="mb-2">No content available</div>
-                        <div className="text-xs text-white/40 mb-3">
-                          This might be a loading issue. Try playing again.
+                        <div className="mb-6">
+                          <svg className="w-12 h-12 text-red-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 18.5c-.77.833.192 2.5 1.732 2.5z" />
+                          </svg>
+                          <div className="text-lg mb-2 text-red-300">Audio Generation Failed</div>
                         </div>
-                        <button 
-                          onClick={() => {
-                            console.log('🔄 Retry button clicked from MaximizedPlayer');
-                            retryCurrentItem();
-                          }}
-                          className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
-                        >
-                          Retry
-                        </button>
+                        
+                        {/* Show error details if current item has error */}
+                        {queueItem?.error && (
+                          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg max-w-md mx-auto">
+                            <div className="text-red-300 text-sm">{queueItem.error}</div>
+                          </div>
+                        )}
+                        
+                        <div className="text-sm text-white/60 mb-4">
+                          The audio could not be generated, but you can still read the content below.
+                        </div>
+                        
+                        <div className="flex gap-3 justify-center mb-6">
+                          <button 
+                            onClick={() => {
+                              console.log('🔄 Retry button clicked from MaximizedPlayer');
+                              retryCurrentItem();
+                            }}
+                            className="px-6 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors border border-white/20 hover:border-white/30"
+                          >
+                            🔄 Retry Audio
+                          </button>
+                          
+                          {queueItem && listeningQueue.length > 1 && (
+                            <button 
+                              onClick={() => {
+                                console.log('⏭️ Skip to next item from error state');
+                                handleControlsNext();
+                              }}
+                              className="px-6 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors border border-white/10 hover:border-white/20"
+                              disabled={currentQueueIndex >= listeningQueue.length - 1}
+                            >
+                              ⏭️ Skip to Next
+                            </button>
+                          )}
+                        </div>
+                        
+                        {/* Show the content even if audio failed */}
+                        {lastKnownContent && (
+                          <div className="mt-6 p-4 bg-white/5 rounded-lg max-w-4xl mx-auto text-left">
+                            <div className="text-xs text-white/40 mb-3 text-center">Content (text-only mode):</div>
+                            <div className="text-white/80 text-base leading-relaxed">
+                              {lastKnownContent.split('\n').map((paragraph, index) => (
+                                <p key={index} className="mb-4 last:mb-0">
+                                  {paragraph.trim()}
+                                </p>
+                              )).filter(p => p.props.children)}
+                            </div>
+                          </div>
+                        )}
+                        
                         {process.env.NODE_ENV === 'development' && (
-                          <div className="text-xs mt-2 text-white/40 p-2 bg-black/20 rounded">
-                            Debug: queueItem={queueItem?.id || 'none'}<br/>
-                            currentText={currentPlayingText?.substring(0, 50) || 'none'}<br/>
-                            lastKnown={lastKnownContent?.substring(0, 50) || 'none'}<br/>
-                            queueLength={listeningQueue.length}<br/>
-                            currentIndex={currentQueueIndex}
+                          <div className="text-xs mt-4 text-white/30 p-3 bg-black/20 rounded max-w-md mx-auto">
+                            <div className="font-bold mb-1">Debug Info:</div>
+                            <div>Queue Item: {queueItem?.id || 'none'}</div>
+                            <div>Current Text: {currentPlayingText?.substring(0, 30) || 'none'}...</div>
+                            <div>Last Known: {lastKnownContent?.substring(0, 30) || 'none'}...</div>
+                            <div>Queue: {currentQueueIndex + 1}/{listeningQueue.length}</div>
+                            <div>Error: {queueItem?.error || 'none'}</div>
                           </div>
                         )}
                       </>
@@ -277,11 +331,11 @@ const MaximizedPlayer: React.FC = () => {
                     {words.length === 0 && contentToShow && (
                       <div className="text-center text-white/40">
                         Content loaded • {contentToShow.length} characters
-                        {isGeneratingAudio && " • Generating audio..."}
-                        {isPlaying && !isGeneratingAudio && audioUrl && " • Playing without word sync"}
-                        {!isPlaying && !isGeneratingAudio && audioUrl && " • Audio ready"}
+                        {isGeneratingAudio && " • Generating audio with precise word timings..."}
+                        {isPlaying && !isGeneratingAudio && audioUrl && " • Playing (word timings not available from API)"}
+                        {!isPlaying && !isGeneratingAudio && audioUrl && " • Audio ready (no word sync available)"}
                         {!audioUrl && !isGeneratingAudio && !isPreloading && (
-                          <span className="text-orange-400"> • Text-only mode (audio failed)</span>
+                          <span className="text-orange-400"> • Text-only mode (audio generation failed)</span>
                         )}
                       </div>
                     )}

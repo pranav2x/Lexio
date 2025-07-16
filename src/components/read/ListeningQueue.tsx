@@ -159,11 +159,30 @@ const ListeningQueue: React.FC = () => {
                         <span className="text-xs text-white/90 font-medium font-mono-enhanced">Playing</span>
                       </div>
                     )}
+                    {item.isLoading && (
+                      <div className="flex items-center gap-1">
+                        <div className="w-3 h-3 animate-spin rounded-full border border-white/60 border-t-white"></div>
+                        <span className="text-xs text-white/70 font-medium font-mono-enhanced">Loading...</span>
+                      </div>
+                    )}
+                    {item.error && (
+                      <div className="flex items-center gap-1">
+                        <svg className="w-3 h-3 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 18.5c-.77.833.192 2.5 1.732 2.5z" />
+                        </svg>
+                        <span className="text-xs text-red-400 font-medium font-mono-enhanced">Failed</span>
+                      </div>
+                    )}
                   </div>
                   <div className="font-semibold text-xs truncate mb-1 font-mono-enhanced">{item.title}</div>
                   <div className="text-xs text-white/60 leading-relaxed font-mono-enhanced">
                     {truncateAtWordBoundary(item.content, 70)}
                   </div>
+                  {item.error && (
+                    <div className="mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-xs text-red-300">
+                      {item.error}
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => removeFromQueue(item.id)}

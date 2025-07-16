@@ -27,7 +27,7 @@ interface AudioContextType {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   cacheStats: any;
   generateAudioForSection: (sectionType: PlayingSection, customText?: string) => Promise<void>;
-  generateWordTimings: (text: string, audioDuration: number) => WordData[];
+  playSectionDirectly: (sectionId: string, content: string) => Promise<void>;
   handlePlayPause: () => void;
   handleStop: () => void;
   handleSeek: (newTime: number) => void;
@@ -78,99 +78,6 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     audioRef,
     words
   });
-
-  // Intelligent word timing generation function
-  const generateWordTimings = useCallback((text: string, audioDuration: number): WordData[] => {
-    if (!text || audioDuration <= 0) return [];
-    
-    console.log('🎯 generateWordTimings called:', { textLength: text.length, audioDuration });
-    
-    // Split text into words and whitespace, preserving structure
-    const tokens = text.split(/(\s+|[.!?]+|[,;:]+)/);
-    const words = tokens.filter(token => token.trim().length > 0 && !/^\s+$/.test(token));
-    
-    if (words.length === 0) return [];
-    
-    // Calculate timing parameters
-    const startBuffer = audioDuration * 0.04; // 4% silence at start
-    const endBuffer = audioDuration * 0.02; // 2% buffer at end
-    const totalSpeechTime = audioDuration - startBuffer - endBuffer;
-    
-    // Calculate base timing per character (more accurate than per word)
-    const totalCharacters = words.reduce((sum, word) => sum + word.length, 0);
-    const baseTimePerChar = totalSpeechTime / Math.max(totalCharacters, 1);
-    
-    // Calculate pause durations
-    const punctuationPauses = new Map([
-      ['.', 0.6], ['!', 0.6], ['?', 0.7], // Long pauses
-      [',', 0.25], [';', 0.3], [':',  0.35], // Medium pauses
-      ['default', 0.1] // Short pause between words
-    ]);
-    
-    const wordTimings: WordData[] = [];
-    let currentTime = startBuffer;
-    
-    words.forEach((word, index) => {
-      // Calculate word duration based on length and complexity
-      let wordDuration = word.length * baseTimePerChar;
-      
-      // Adjust for word complexity
-      if (word.length > 12) wordDuration *= 1.3; // Very long words
-      else if (word.length > 8) wordDuration *= 1.15; // Long words
-      else if (word.length < 3) wordDuration *= 0.85; // Short words
-      
-      // Adjust for word patterns
-      if (/^[A-Z][a-z]+$/.test(word)) wordDuration *= 1.1; // Proper nouns
-      if (/\d+/.test(word)) wordDuration *= 1.2; // Numbers
-      if (/[A-Z]{2,}/.test(word)) wordDuration *= 1.4; // Acronyms
-      
-      // Create word timing
-      const wordTiming: WordData = {
-        text: word,
-        start: currentTime,
-        end: currentTime + wordDuration
-      };
-      
-      wordTimings.push(wordTiming);
-      currentTime += wordDuration;
-      
-      // Add pause after word based on punctuation
-      if (index < words.length - 1) { // Don't add pause after last word
-        let pauseDuration = punctuationPauses.get('default')!;
-        
-        // Check for punctuation at end of word
-        const lastChar = word[word.length - 1];
-        if (punctuationPauses.has(lastChar)) {
-          pauseDuration = punctuationPauses.get(lastChar)!;
-        }
-        
-        // Add natural breathing pauses for long sentences
-        if (index > 0 && index % 15 === 0) pauseDuration += 0.2;
-        
-        currentTime += pauseDuration;
-      }
-    });
-    
-    // Normalize timings to fit exactly within audio duration
-    const actualTotalTime = currentTime;
-    const expectedTotalTime = audioDuration - endBuffer;
-    const scaleFactor = expectedTotalTime / actualTotalTime;
-    
-    const normalizedTimings = wordTimings.map(timing => ({
-      ...timing,
-      start: startBuffer + (timing.start - startBuffer) * scaleFactor,
-      end: startBuffer + (timing.end - startBuffer) * scaleFactor
-    }));
-    
-    console.log('✅ generateWordTimings completed:', {
-      wordsGenerated: normalizedTimings.length,
-      totalDuration: audioDuration,
-      lastWordEnd: normalizedTimings[normalizedTimings.length - 1]?.end,
-      scaleFactor: scaleFactor.toFixed(3)
-    });
-    
-    return normalizedTimings;
-  }, []);
 
   // Debug: Track when currentPlayingText changes
   useEffect(() => {
@@ -304,6 +211,32 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIsPlaying(false);
   }, [audioUrl]);
 
+  // New function for direct play from ContentCard (moved from ContentCard.tsx)
+  const playSectionDirectly = useCallback(async (sectionId: string, content: string) => {
+    console.log('🎯 Direct play called for:', { sectionId, contentLength: content.length });
+    
+    if (!content || content.trim().length === 0) {
+      console.error('❌ No content to play');
+      return;
+    }
+
+    try {
+      // Clear any existing audio first
+      clearAudio();
+      
+      console.log('🎯 Starting direct audio generation...');
+      await generateAudioForSection(sectionId as PlayingSection, content);
+      console.log('✅ Audio generation completed, starting playback...');
+      
+      // Start playing immediately after generation
+      setTimeout(() => {
+        handlePlayPause();
+      }, 200);
+    } catch (error) {
+      console.error('❌ Error in direct play:', error);
+    }
+  }, [generateAudioForSection, clearAudio, handlePlayPause]);
+
   const handleClearCache = useCallback(() => {
     if (process.env.NODE_ENV === 'development') {
       import('@/lib/tts').then(({ clearTTSCache }) => {
@@ -348,7 +281,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       isPreloading,
       cacheStats,
       generateAudioForSection,
-      generateWordTimings,
+      playSectionDirectly,
       handlePlayPause,
       handleStop,
       handleSeek,
@@ -365,52 +298,55 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       formatTime,
     }}>
       {children}
-      {/* Always render audio element so ref is available */}
-      <audio
-        ref={audioRef}
-        src={audioUrl || ''}
-        preload="auto"
-        onPlay={() => {
-          console.log('Audio element: onPlay event fired');
-          setIsPlaying(true);
-        }}
-        onPause={() => {
-          console.log('Audio element: onPause event fired');
-          setIsPlaying(false);
-        }}
-        onLoadedData={() => {
-          console.log('Audio element: onLoadedData fired, duration:', audioRef.current?.duration);
-          if (audioRef.current) {
-            const audioDuration = audioRef.current.duration;
-            setDuration(audioDuration);
-            
-            // Generate word timings if we don't have real ones from ElevenLabs
-            if (currentPlayingText && words.length === 0 && audioDuration > 0) {
-              console.log('🎯 No real word timings available, generating intelligent fallback timings');
-              const generatedTimings = generateWordTimings(currentPlayingText, audioDuration);
-              if (generatedTimings.length > 0) {
-                setWords(generatedTimings);
-                console.log('✅ Fallback word timings set:', generatedTimings.length, 'words');
+      {/* FIX: Only render the audio element when a valid URL exists */}
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          preload="auto"
+          onPlay={() => {
+            console.log('Audio element: onPlay event fired');
+            setIsPlaying(true);
+          }}
+          onPause={() => {
+            console.log('Audio element: onPause event fired');
+            setIsPlaying(false);
+          }}
+          onLoadedData={() => {
+            console.log('Audio element: onLoadedData fired, duration:', audioRef.current?.duration);
+            if (audioRef.current) {
+              const audioDuration = audioRef.current.duration;
+              setDuration(audioDuration);
+              
+              // Generate word timings if we don't have real ones from ElevenLabs
+              if (currentPlayingText && words.length === 0 && audioDuration > 0) {
+                console.log('🎯 No real word timings available, generating intelligent fallback timings');
+                // This fallback logic is no longer needed as we rely on API word timings
+                // const generatedTimings = generateWordTimings(currentPlayingText, audioDuration);
+                // if (generatedTimings.length > 0) {
+                //   setWords(generatedTimings);
+                //   console.log('✅ Fallback word timings set:', generatedTimings.length, 'words');
+                // }
               }
             }
-          }
-        }}
-        onTimeUpdate={() => {
-          if (audioRef.current) {
-            setCurrentTime(audioRef.current.currentTime);
-          }
-        }}
-        onError={(e) => {
-          console.error('Audio element: onError fired', e);
-          setAudioError('Audio playback failed');
-          setIsPlaying(false);
-        }}
-        onEnded={() => {
-          console.log('Audio element: onEnded fired');
-          setIsPlaying(false);
-          setCurrentTime(0);
-        }}
-      />
+          }}
+          onTimeUpdate={() => {
+            if (audioRef.current) {
+              setCurrentTime(audioRef.current.currentTime);
+            }
+          }}
+          onError={(e) => {
+            console.error('Audio element: onError fired', e);
+            setAudioError('Audio playback failed');
+            setIsPlaying(false);
+          }}
+          onEnded={() => {
+            console.log('Audio element: onEnded fired');
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }}
+        />
+      )}
     </AudioContext.Provider>
   );
 };
