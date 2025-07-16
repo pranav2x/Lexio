@@ -222,7 +222,7 @@ const MaximizedPlayer: React.FC = () => {
                     {isGeneratingAudio || isPreloading ? (
                       <>
                         <div className="animate-spin h-8 w-8 border-b-2 border-white/30 mx-auto mb-4"></div>
-                        <div className="text-lg mb-2">Preparing synchronized audio...</div>
+                        <div className="text-lg mb-2">🎬 Loading Flawless Demo... Please Wait.</div>
                         <div className="text-sm text-white/40">
                           {isGeneratingAudio ? 'Generating audio with precise word timings...' : 'Loading audio for playback...'}
                         </div>

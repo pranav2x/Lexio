@@ -192,17 +192,12 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       return;
     }
 
-    // --- DEMO MODE TEMPORARILY DISABLED FOR DATA COLLECTION ---
-    // 
-    // AFTER COLLECTING DATA: 
-    // 1. Paste your API responses into src/lib/demo-data.ts
-    // 2. Uncomment the block below (remove the // from each line)
-    // 3. Comment out or delete this instruction block
-    // 4. Your demo mode will be active!
-
+    // --- DEMO MODE INTERCEPTOR ---
     // const demoData = getDemoData(item.id);
     // if (demoData) {
     //   console.log(`🎬 DEMO MODE: Loading hardcoded audio for: ${item.id}`);
+    //   
+    //   // Set UI states for a realistic demo effect
     //   setIsPreloading(true);
     //   setItemLoading(item.id, true);
     //   setCurrentPlayingText(item.content);
@@ -211,17 +206,23 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     //   setCurrentQueueIndex(index);
     //   setCurrentPlayingSection(item.id as PlayingSection);
     //   clearAudio();
-    //   await new Promise(resolve => setTimeout(resolve, 1500));
+
+    //   // Simulate network delay for the demo video
+    //   await new Promise(resolve => setTimeout(resolve, 1000));
+
     //   const cachedAudioUrl = URL.createObjectURL(demoData.audioBlob);
     //   setAudioUrl(cachedAudioUrl);
     //   setWords(demoData.wordTimings);
+
     //   setIsPreloading(false);
     //   setItemLoading(item.id, false);
+    //   
     //   console.log('✅ Demo audio loaded successfully');
+    //   // The AudioContext's onCanPlay handler will now automatically play the audio.
+    //   // We exit here to completely skip the live API call logic.
     //   return;
     // }
-
-    // --- END OF DEMO LOGIC ---
+    // --- END OF DEMO MODE LOGIC ---
 
     console.log(`🌐 LIVE MODE: Making API call for: ${item.id}`);
     
@@ -276,7 +277,7 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       clearAudio();
 
       // 2. Set a specific error on the queue item for the UI to display.
-      setItemError(item.id, errorMessage);
+      setItemError(item.id, `Live API call failed: ${errorMessage}`);
 
       // 3. Ensure all loading states are turned off.
       setIsPreloading(false);
