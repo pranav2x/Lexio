@@ -99,6 +99,24 @@ const WordHighlighter: React.FC<WordHighlighterProps> = ({
     }
   }, [words, currentWordIndex]);
 
+  // NEW: Debug when words prop changes
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔄 WordHighlighter: words prop changed:', {
+        wordsLength: words.length,
+        firstWord: words[0]?.text || 'none',
+        lastWord: words[words.length - 1]?.text || 'none',
+        sampleWords: words.slice(0, 3).map(w => `"${w.text}" (${w.start}s-${w.end}s)`)
+      });
+      
+      if (words.length === 0) {
+        console.warn('⚠️ WordHighlighter received empty words array - will show "Preparing synchronized highlighting" message');
+      } else {
+        console.log('✅ WordHighlighter received words, highlighting should work');
+      }
+    }
+  }, [words]);
+
   // Enhanced fallback state - show content while word timings are being prepared
   if (words.length === 0) {
     return (

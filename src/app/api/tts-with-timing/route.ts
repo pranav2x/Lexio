@@ -87,11 +87,25 @@ export async function POST(request: NextRequest) {
     const data: ElevenLabsTimestampResponse = await response.json();
 
     console.log('✅ Received ElevenLabs response with character alignment');
+    console.log('🔍 Character alignment details:', {
+      charactersCount: data.alignment?.characters?.length || 0,
+      startTimesCount: data.alignment?.character_start_times_seconds?.length || 0,
+      endTimesCount: data.alignment?.character_end_times_seconds?.length || 0,
+      hasAlignment: !!data.alignment,
+      firstChars: data.alignment?.characters?.slice(0, 10)?.join('') || 'none',
+      firstStartTimes: data.alignment?.character_start_times_seconds?.slice(0, 5) || []
+    });
 
     // Parse character-level alignment into word-level timings
     const wordTimings = parseCharacterAlignmentToWords(data.alignment);
 
     console.log('✅ Parsed character alignment into word timings:', wordTimings.length, 'words');
+    console.log('🔍 Word timing details:', {
+      totalWords: wordTimings.length,
+      firstWord: wordTimings[0],
+      lastWord: wordTimings[wordTimings.length - 1],
+      sampleWords: wordTimings.slice(0, 5).map(w => `"${w.text}" (${w.start.toFixed(2)}s-${w.end.toFixed(2)}s)`)
+    });
 
     // Calculate audio duration from last character timing
     const alignment = data.alignment;
@@ -133,9 +147,28 @@ export async function POST(request: NextRequest) {
 function parseCharacterAlignmentToWords(alignment: CharacterAlignment): WordTiming[] {
   const { characters, character_start_times_seconds, character_end_times_seconds } = alignment;
   
+  console.log('🔍 parseCharacterAlignmentToWords called with:', {
+    charactersLength: characters?.length || 0,
+    startTimesLength: character_start_times_seconds?.length || 0,
+    endTimesLength: character_end_times_seconds?.length || 0
+  });
+  
   if (!characters || characters.length === 0) {
-    console.warn('No character alignment data received');
+    console.warn('⚠️ No character alignment data received');
     return [];
+  }
+
+  if (!character_start_times_seconds || !character_end_times_seconds) {
+    console.warn('⚠️ Missing timing arrays in character alignment');
+    return [];
+  }
+
+  if (characters.length !== character_start_times_seconds.length || characters.length !== character_end_times_seconds.length) {
+    console.warn('⚠️ Character and timing arrays have mismatched lengths:', {
+      characters: characters.length,
+      startTimes: character_start_times_seconds.length,
+      endTimes: character_end_times_seconds.length
+    });
   }
 
   const words: WordTiming[] = [];
@@ -150,6 +183,7 @@ function parseCharacterAlignmentToWords(alignment: CharacterAlignment): WordTimi
 
     // Skip if timing data is missing
     if (typeof startTime !== 'number' || typeof endTime !== 'number') {
+      console.warn(`⚠️ Missing timing data at index ${i}:`, { char, startTime, endTime });
       continue;
     }
 
@@ -160,11 +194,16 @@ function parseCharacterAlignmentToWords(alignment: CharacterAlignment): WordTimi
     if (isWordBreak) {
       // End current word if we have one
       if (currentWord.trim().length > 0 && wordStartTime !== null && wordEndTime !== null) {
-        words.push({
+        const newWord = {
           text: currentWord.trim(),
           start: wordStartTime,
           end: wordEndTime
-        });
+        };
+        words.push(newWord);
+        
+        if (words.length <= 5) {
+          console.log(`📝 Added word ${words.length}:`, newWord);
+        }
       }
       
       // Reset for next word
@@ -185,11 +224,16 @@ function parseCharacterAlignmentToWords(alignment: CharacterAlignment): WordTimi
       
       // If this is punctuation at the end of a word, close the word
       if (isPunctuation && currentWord.trim().length > 0) {
-        words.push({
+        const newWord = {
           text: currentWord.trim(),
           start: wordStartTime!,
           end: wordEndTime
-        });
+        };
+        words.push(newWord);
+        
+        if (words.length <= 5) {
+          console.log(`📝 Added word ${words.length} (with punctuation):`, newWord);
+        }
         
         // Reset for next word
         currentWord = '';
@@ -201,11 +245,13 @@ function parseCharacterAlignmentToWords(alignment: CharacterAlignment): WordTimi
 
   // Handle final word if text doesn't end with whitespace
   if (currentWord.trim().length > 0 && wordStartTime !== null && wordEndTime !== null) {
-    words.push({
+    const finalWord = {
       text: currentWord.trim(),
       start: wordStartTime,
       end: wordEndTime
-    });
+    };
+    words.push(finalWord);
+    console.log(`📝 Added final word:`, finalWord);
   }
 
   console.log('📊 Character-to-word parsing stats:', {
@@ -214,6 +260,12 @@ function parseCharacterAlignmentToWords(alignment: CharacterAlignment): WordTimi
     firstWord: words[0]?.text,
     lastWord: words[words.length - 1]?.text
   });
+
+  if (words.length === 0) {
+    console.error('❌ No words were parsed from character alignment!');
+  } else {
+    console.log('✅ Successfully parsed words from character alignment');
+  }
 
   return words;
 } 

@@ -112,30 +112,47 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCurrentPlayingSection(sectionType);
     
     // Clear words immediately to prevent stale highlighting
+    console.log('🧹 Clearing existing words before generating new audio');
     setWords([]);
     
     try {
       setCurrentPlayingText(customText);
       
+      console.log('🚀 Calling generateSpeech with selectedVoiceId:', selectedVoiceId);
       const result = await generateSpeech(customText, {}, selectedVoiceId);
       console.log('✅ generateSpeech completed:', { 
         audioUrl: !!result.audioUrl, 
-        wordTimingsCount: result.wordTimings?.length 
+        wordTimingsCount: result.wordTimings?.length,
+        firstWordTiming: result.wordTimings?.[0],
+        lastWordTiming: result.wordTimings?.[result.wordTimings?.length - 1]
       });
       
       setAudioUrl(result.audioUrl);
       
       // Use real word timings from ElevenLabs
       if (result.wordTimings && result.wordTimings.length > 0) {
-        console.log('🎯 Using real word timings from ElevenLabs:', result.wordTimings.length, 'words');
+        console.log('🎯 Setting word timings from ElevenLabs:', {
+          count: result.wordTimings.length,
+          firstWord: result.wordTimings[0],
+          lastWord: result.wordTimings[result.wordTimings.length - 1],
+          sampleTimings: result.wordTimings.slice(0, 5).map(w => `"${w.text}" (${w.start.toFixed(2)}s-${w.end.toFixed(2)}s)`)
+        });
         const wordData: WordData[] = result.wordTimings.map((timing) => ({
           text: timing.text,
           start: timing.start,
           end: timing.end
         }));
         setWords(wordData);
+        console.log('✅ Word timings have been set in AudioContext state');
       } else {
-        console.log('🎯 No word timings available from ElevenLabs');
+        console.warn('⚠️ No word timings received from ElevenLabs API - highlighting will not work');
+        console.log('🔍 API response details:', {
+          hasResult: !!result,
+          hasWordTimings: !!result.wordTimings,
+          wordTimingsType: typeof result.wordTimings,
+          wordTimingsLength: result.wordTimings?.length,
+          fullResult: result
+        });
         setWords([]);
       }
       
