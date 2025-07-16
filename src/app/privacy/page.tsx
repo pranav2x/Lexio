@@ -130,7 +130,7 @@ export default function PrivacyPage() {
 
                 <section>
                   <h2 className="text-xl font-medium text-black mb-4">
-                    children's privacy
+                    children&apos;s privacy
                   </h2>
                   <div className="text-gray-700 space-y-4 leading-relaxed">
                     <p>
@@ -160,7 +160,7 @@ export default function PrivacyPage() {
                   </h2>
                   <div className="text-gray-700 space-y-4 leading-relaxed">
                     <p>
-                      We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last updated" date. Changes are effective immediately upon posting.
+                      We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the &quot;Last updated&quot; date. Changes are effective immediately upon posting.
                     </p>
                   </div>
                 </section>

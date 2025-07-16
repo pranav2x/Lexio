@@ -28,7 +28,9 @@ export interface FirecrawlResponse {
     html?: string;
     rawHtml?: string;
     links?: string[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     extract?: any; // For LLM extraction results (legacy)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     json?: any; // For LLM extraction results (current format)
     metadata?: {
       title?: string;

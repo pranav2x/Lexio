@@ -105,7 +105,7 @@ export default function TestHighlightPage() {
           <div className="text-center text-sm text-white/60">
             Current word index: {currentWordIndex} | Playing: {isPlaying ? 'Yes' : 'No'}
             {currentWordIndex >= 0 && wordsData[currentWordIndex] && (
-              <> | Current word: "{wordsData[currentWordIndex].word}"</>
+              <> | Current word: &quot;{wordsData[currentWordIndex].word}&quot;</>
             )}
           </div>
         </div>

@@ -1,15 +1,9 @@
 "use client";
 
 import React, { createContext, useContext, useRef, useState, useCallback, useEffect } from 'react';
-import { generateSpeech, cleanupAudioUrl, getTTSCacheStats } from '@/lib/tts';
+import { generateSpeechWithTimings, cleanupAudioUrl, getTTSCacheStats } from '@/lib/tts';
 import { useLexioState } from '@/lib/store';
-
-interface WordData {
-  word: string;
-  index: number;
-  startTime: number;
-  endTime: number;
-}
+import { useWordSync, WordData } from '@/hooks/useWordSync';
 
 type PlayingSection = 'summary' | `section-${number}` | null;
 
@@ -26,12 +20,14 @@ interface AudioContextType {
   currentWordIndex: number;
   currentPlayingSection: PlayingSection;
   currentPlayingText: string;
-  wordsData: WordData[];
+  words: WordData[];
   isMaximized: boolean;
   isTransitioning: boolean;
   isPreloading: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   cacheStats: any;
   generateAudioForSection: (sectionType: PlayingSection, customText?: string) => Promise<void>;
+  generateWordTimings: (text: string, audioDuration: number) => WordData[];
   handlePlayPause: () => void;
   handleStop: () => void;
   handleSeek: (newTime: number) => void;
@@ -41,14 +37,11 @@ interface AudioContextType {
   setIsPreloading: (preloading: boolean) => void;
   setCurrentPlayingSection: (section: PlayingSection) => void;
   setCurrentPlayingText: (text: string) => void;
-  setCurrentWordIndex: (index: number) => void;
-  setWordsData: (data: WordData[]) => void;
+  setWords: (words: WordData[]) => void;
   setAudioUrl: (url: string | null) => void;
   clearAudio: () => void;
   handleClearCache: () => void;
   formatTime: (seconds: number) => string;
-  findCurrentWordIndex: (currentTime: number) => number;
-  generateWordTimings: (text: string, audioDuration: number) => WordData[];
 }
 
 const AudioContext = createContext<AudioContextType | undefined>(undefined);
@@ -69,17 +62,123 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [hasSelectedSpeed, setHasSelectedSpeed] = useState(false);
-  const [currentWordIndex, setCurrentWordIndex] = useState(-1);
   const [currentPlayingSection, setCurrentPlayingSection] = useState<PlayingSection>(null);
   const [currentPlayingText, setCurrentPlayingText] = useState('');
-  
+  const [words, setWords] = useState<WordData[]>([]);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [isTransitioning] = useState(false);
+  const [isPreloading, setIsPreloading] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [cacheStats, setCacheStats] = useState<any>(null);
+
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  // Use the simplified word sync hook
+  const { currentWordIndex } = useWordSync({
+    audioRef,
+    words
+  });
+
+  // Intelligent word timing generation function
+  const generateWordTimings = useCallback((text: string, audioDuration: number): WordData[] => {
+    if (!text || audioDuration <= 0) return [];
+    
+    console.log('🎯 generateWordTimings called:', { textLength: text.length, audioDuration });
+    
+    // Split text into words and whitespace, preserving structure
+    const tokens = text.split(/(\s+|[.!?]+|[,;:]+)/);
+    const words = tokens.filter(token => token.trim().length > 0 && !/^\s+$/.test(token));
+    
+    if (words.length === 0) return [];
+    
+    // Calculate timing parameters
+    const startBuffer = audioDuration * 0.04; // 4% silence at start
+    const endBuffer = audioDuration * 0.02; // 2% buffer at end
+    const totalSpeechTime = audioDuration - startBuffer - endBuffer;
+    
+    // Calculate base timing per character (more accurate than per word)
+    const totalCharacters = words.reduce((sum, word) => sum + word.length, 0);
+    const baseTimePerChar = totalSpeechTime / Math.max(totalCharacters, 1);
+    
+    // Calculate pause durations
+    const punctuationPauses = new Map([
+      ['.', 0.6], ['!', 0.6], ['?', 0.7], // Long pauses
+      [',', 0.25], [';', 0.3], [':',  0.35], // Medium pauses
+      ['default', 0.1] // Short pause between words
+    ]);
+    
+    const wordTimings: WordData[] = [];
+    let currentTime = startBuffer;
+    
+    words.forEach((word, index) => {
+      // Calculate word duration based on length and complexity
+      let wordDuration = word.length * baseTimePerChar;
+      
+      // Adjust for word complexity
+      if (word.length > 12) wordDuration *= 1.3; // Very long words
+      else if (word.length > 8) wordDuration *= 1.15; // Long words
+      else if (word.length < 3) wordDuration *= 0.85; // Short words
+      
+      // Adjust for word patterns
+      if (/^[A-Z][a-z]+$/.test(word)) wordDuration *= 1.1; // Proper nouns
+      if (/\d+/.test(word)) wordDuration *= 1.2; // Numbers
+      if (/[A-Z]{2,}/.test(word)) wordDuration *= 1.4; // Acronyms
+      
+      // Create word timing
+      const wordTiming: WordData = {
+        text: word,
+        start: currentTime,
+        end: currentTime + wordDuration
+      };
+      
+      wordTimings.push(wordTiming);
+      currentTime += wordDuration;
+      
+      // Add pause after word based on punctuation
+      if (index < words.length - 1) { // Don't add pause after last word
+        let pauseDuration = punctuationPauses.get('default')!;
+        
+        // Check for punctuation at end of word
+        const lastChar = word[word.length - 1];
+        if (punctuationPauses.has(lastChar)) {
+          pauseDuration = punctuationPauses.get(lastChar)!;
+        }
+        
+        // Add natural breathing pauses for long sentences
+        if (index > 0 && index % 15 === 0) pauseDuration += 0.2;
+        
+        currentTime += pauseDuration;
+      }
+    });
+    
+    // Normalize timings to fit exactly within audio duration
+    const actualTotalTime = currentTime;
+    const expectedTotalTime = audioDuration - endBuffer;
+    const scaleFactor = expectedTotalTime / actualTotalTime;
+    
+    const normalizedTimings = wordTimings.map(timing => ({
+      ...timing,
+      start: startBuffer + (timing.start - startBuffer) * scaleFactor,
+      end: startBuffer + (timing.end - startBuffer) * scaleFactor
+    }));
+    
+    console.log('✅ generateWordTimings completed:', {
+      wordsGenerated: normalizedTimings.length,
+      totalDuration: audioDuration,
+      lastWordEnd: normalizedTimings[normalizedTimings.length - 1]?.end,
+      scaleFactor: scaleFactor.toFixed(3)
+    });
+    
+    return normalizedTimings;
+  }, []);
+
   // Debug: Track when currentPlayingText changes
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
       console.log('🔄 AudioContext: currentPlayingText changed, length:', currentPlayingText.length);
     }
   }, [currentPlayingText]);
-  
+
   // Debug: Create a wrapped setCurrentPlayingText to track calls
   const wrappedSetCurrentPlayingText = useCallback((text: string) => {
     if (process.env.NODE_ENV === 'development') {
@@ -87,80 +186,91 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     setCurrentPlayingText(text);
   }, []);
-  const [wordsData, setWordsData] = useState<WordData[]>([]);
-  const [isMaximized, setIsMaximized] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
-  const [isPreloading, setIsPreloading] = useState(false);
-  const [cacheStats, setCacheStats] = useState<any>(null);
-
-  const audioRef = useRef<HTMLAudioElement>(null);
-
-  const findCurrentWordIndex = useCallback((time: number): number => {
-    if (!wordsData.length) return -1;
-    
-    // Find the word that should be highlighted at the current time
-    // We'll highlight a word if we're within its timing window
-    for (let i = 0; i < wordsData.length; i++) {
-      const word = wordsData[i];
-      // Give a small buffer (0.1s) to make highlighting feel more natural
-      if (time >= word.startTime - 0.1 && time <= word.endTime + 0.1) {
-        return i;
-      }
-    }
-    
-    // If no exact match, find the closest word
-    // This handles cases where timing might be slightly off
-    let closestIndex = -1;
-    let closestDistance = Infinity;
-    
-    for (let i = 0; i < wordsData.length; i++) {
-      const word = wordsData[i];
-      const wordMidpoint = (word.startTime + word.endTime) / 2;
-      const distance = Math.abs(time - wordMidpoint);
-      
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestIndex = i;
-      }
-    }
-    
-    // Only return the closest word if it's within a reasonable range (2 seconds)
-    return closestDistance < 2 ? closestIndex : -1;
-  }, [wordsData]);
 
   const generateAudioForSection = useCallback(async (sectionType: PlayingSection, customText?: string) => {
-    if (!sectionType) return;
+    console.log('🎯 generateAudioForSection called:', { sectionType, customTextLength: customText?.length });
+    
+    if (!sectionType) {
+      console.error('❌ No sectionType provided');
+      return;
+    }
+    
+    if (!customText) {
+      console.warn('generateAudioForSection called without customText - this should use the queue system');
+      return;
+    }
+    
     setIsGeneratingAudio(true);
     setAudioError(null);
     setCurrentPlayingSection(sectionType);
+    
+    // Clear words immediately to prevent stale highlighting
+    setWords([]);
+    
     try {
-      const textToSpeak = customText || '';
-      setCurrentPlayingText(textToSpeak);
-      const result = await generateSpeech(textToSpeak, {}, selectedVoiceId);
+      setCurrentPlayingText(customText);
+      
+      const result = await generateSpeechWithTimings(customText, {}, selectedVoiceId);
+      console.log('✅ generateSpeechWithTimings completed:', { 
+        audioUrl: !!result.audioUrl, 
+        wordTimingsCount: result.wordTimings?.length 
+      });
+      
       setAudioUrl(result.audioUrl);
-      setWordsData([]); // Word timings will be generated when audio loads
+      
+      // Use real word timings from ElevenLabs
+      if (result.wordTimings && result.wordTimings.length > 0) {
+        console.log('🎯 Using real word timings from ElevenLabs:', result.wordTimings.length, 'words');
+        const wordData: WordData[] = result.wordTimings.map((timing) => ({
+          text: timing.text,
+          start: timing.start,
+          end: timing.end
+        }));
+        setWords(wordData);
+      } else {
+        console.log('🎯 No word timings available from ElevenLabs');
+        setWords([]);
+      }
+      
       if (process.env.NODE_ENV === 'development') setCacheStats(getTTSCacheStats());
     } catch (err) {
-      console.error('generateAudioForSection error:', err);
+      console.error('❌ generateAudioForSection error:', err);
       setAudioError('Failed to generate audio.');
       setCurrentPlayingSection(null);
       setCurrentPlayingText('');
+      setWords([]);
     } finally {
       setIsGeneratingAudio(false);
     }
   }, [selectedVoiceId]);
 
   const handlePlayPause = useCallback(() => {
-    if (!audioRef.current || !audioUrl) return;
-    isPlaying ? audioRef.current.pause() : audioRef.current.play().catch(console.debug);
+    console.log('🎵 handlePlayPause called:', { 
+      hasAudioRef: !!audioRef.current, 
+      hasAudioUrl: !!audioUrl, 
+      isPlaying
+    });
+    
+    if (!audioRef.current || !audioUrl) {
+      console.error('❌ Cannot play: missing audioRef or audioUrl');
+      return;
+    }
+    
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play().catch(error => {
+        console.error('❌ Audio play error:', error);
+      });
+    }
   }, [audioUrl, isPlaying]);
 
   const handleStop = useCallback(() => {
     if (audioRef.current) audioRef.current.pause();
     if (audioRef.current) audioRef.current.currentTime = 0;
-    setCurrentWordIndex(-1);
     setCurrentPlayingSection(null);
     setCurrentPlayingText('');
+    setWords([]);
     if (audioUrl) cleanupAudioUrl(audioUrl);
     setAudioUrl(null);
   }, [audioUrl]);
@@ -170,11 +280,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const handleWordClick = useCallback((index: number) => {
-    const word = wordsData[index];
+    const word = words[index];
     if (!word || !audioRef.current) return;
-    audioRef.current.currentTime = word.startTime;
-    setCurrentWordIndex(index);
-  }, [wordsData]);
+    audioRef.current.currentTime = word.start;
+  }, [words]);
 
   const handleSpeedChange = useCallback((rate: number) => {
     if (!audioRef.current) return;
@@ -191,8 +300,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAudioUrl(null);
     setCurrentPlayingSection(null);
     setCurrentPlayingText('');
-    setCurrentWordIndex(-1);
-    setWordsData([]);
+    setWords([]);
     setIsPlaying(false);
   }, [audioUrl]);
 
@@ -206,125 +314,11 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const formatTime = useCallback((s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`, []);
 
-  const generateWordTimings = useCallback((text: string, audioDuration: number): WordData[] => {
-    const words = text.split(/(\s+)/);
-    const nonWhitespaceWords = words.filter(word => word.trim() !== '');
-    if (nonWhitespaceWords.length === 0) return [];
-    
-    console.log('🔤 Generating word timings for', nonWhitespaceWords.length, 'words, duration:', audioDuration.toFixed(2) + 's');
-    
-    // More realistic timing calculation
-    const totalSpeechTime = audioDuration * 0.92; // Leave 8% for start/end silence
-    const wordsPerMinute = 160; // Average TTS speaking rate
-    const baseWordsPerSecond = wordsPerMinute / 60;
-    const expectedDuration = nonWhitespaceWords.length / baseWordsPerSecond;
-    
-    // Scale factor to match actual audio duration
-    const scaleFactor = totalSpeechTime / expectedDuration;
-    
-    let currentTime = audioDuration * 0.04; // Start after 4% of audio
-    const wordTimings: WordData[] = [];
-    
-    words.forEach((word, index) => {
-      if (word.trim() === '') {
-        // Whitespace - minimal pause
-        const pauseDuration = 0.05 * scaleFactor;
-        wordTimings.push({
-          word,
-          index,
-          startTime: currentTime,
-          endTime: currentTime + pauseDuration,
-        });
-        currentTime += pauseDuration;
-      } else {
-        // Calculate word duration based on length and complexity
-        let baseWordDuration = 0.4; // Base duration in seconds
-        
-        // Adjust for word length
-        const lengthFactor = Math.max(0.5, Math.min(2.0, word.length / 5));
-        baseWordDuration *= lengthFactor;
-        
-        // Adjust for word complexity (numbers, capitalization, etc.)
-        if (/^\d+$/.test(word)) baseWordDuration *= 1.3; // Numbers take longer
-        if (/^[A-Z]{2,}$/.test(word)) baseWordDuration *= 1.2; // Acronyms
-        if (word.length > 10) baseWordDuration *= 1.1; // Long words
-        
-        const wordDuration = baseWordDuration * scaleFactor;
-        
-        // Calculate pause after word based on punctuation
-        let pauseAfter = 0.08 * scaleFactor; // Default small pause
-        if (/[.!?]$/.test(word)) {
-          pauseAfter = 0.5 * scaleFactor; // Sentence end
-        } else if (/[,;:]$/.test(word)) {
-          pauseAfter = 0.25 * scaleFactor; // Clause end
-        } else if (/[-—]$/.test(word)) {
-          pauseAfter = 0.2 * scaleFactor; // Dash
-        }
-        
-        wordTimings.push({
-          word,
-          index,
-          startTime: currentTime,
-          endTime: currentTime + wordDuration,
-        });
-        
-        currentTime += wordDuration + pauseAfter;
-      }
-    });
-    
-    // Final adjustment to ensure we don't exceed audio duration
-    const totalCalculatedTime = currentTime;
-    if (totalCalculatedTime > audioDuration) {
-      const compressionFactor = (audioDuration * 0.98) / totalCalculatedTime;
-      wordTimings.forEach(timing => {
-        timing.startTime *= compressionFactor;
-        timing.endTime *= compressionFactor;
-      });
-    }
-    
-    console.log('✅ Generated', wordTimings.length, 'word timings');
-    
-    return wordTimings;
-  }, []);
-
-  useEffect(() => {
-    if (!isPlaying || !wordsData.length) return;
-    
-    console.log('🔄 Starting word highlighting updates for', wordsData.length, 'words');
-    
-    const interval = setInterval(() => {
-      const time = audioRef.current?.currentTime || 0;
-      const idx = findCurrentWordIndex(time);
-      
-      if (idx !== currentWordIndex) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log('🎯 Word highlight changed:', {
-            time: time.toFixed(2),
-            newIndex: idx,
-            word: idx >= 0 ? wordsData[idx]?.word : 'NONE'
-          });
-        }
-        setCurrentWordIndex(idx);
-      }
-    }, 50); // Update every 50ms for smooth highlighting
-    
-    return () => {
-      console.log('🛑 Stopping word highlighting updates');
-      clearInterval(interval);
-    };
-  }, [isPlaying, wordsData, findCurrentWordIndex, currentWordIndex]);
-
+  // Audio event handlers
   useEffect(() => {
     if (!audioRef.current || !audioUrl) return;
     const audio = audioRef.current;
-    const setDur = () => {
-      setDuration(audio.duration);
-      // Generate word timings when we have both duration and text
-      if (audio.duration && currentPlayingText) {
-        const timings = generateWordTimings(currentPlayingText, audio.duration);
-        setWordsData(timings);
-      }
-    };
+    const setDur = () => setDuration(audio.duration);
     const syncTime = () => setCurrentTime(audio.currentTime);
     audio.addEventListener('loadedmetadata', setDur);
     audio.addEventListener('timeupdate', syncTime);
@@ -332,7 +326,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audio.removeEventListener('loadedmetadata', setDur);
       audio.removeEventListener('timeupdate', syncTime);
     };
-  }, [audioUrl, currentPlayingText, generateWordTimings]);
+  }, [audioUrl]);
 
   return (
     <AudioContext.Provider value={{
@@ -348,12 +342,13 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       currentWordIndex,
       currentPlayingSection,
       currentPlayingText,
-      wordsData,
+      words,
       isMaximized,
       isTransitioning,
       isPreloading,
       cacheStats,
       generateAudioForSection,
+      generateWordTimings,
       handlePlayPause,
       handleStop,
       handleSeek,
@@ -363,25 +358,59 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setIsPreloading,
       setCurrentPlayingSection,
       setCurrentPlayingText: wrappedSetCurrentPlayingText,
-      setCurrentWordIndex,
-      setWordsData,
+      setWords,
       setAudioUrl,
       clearAudio,
       handleClearCache,
       formatTime,
-      findCurrentWordIndex,
-      generateWordTimings,
     }}>
       {children}
-      {audioUrl && (
-        <audio
-          ref={audioRef}
-          src={audioUrl}
-          preload="auto"
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-        />
-      )}
+      {/* Always render audio element so ref is available */}
+      <audio
+        ref={audioRef}
+        src={audioUrl || ''}
+        preload="auto"
+        onPlay={() => {
+          console.log('Audio element: onPlay event fired');
+          setIsPlaying(true);
+        }}
+        onPause={() => {
+          console.log('Audio element: onPause event fired');
+          setIsPlaying(false);
+        }}
+        onLoadedData={() => {
+          console.log('Audio element: onLoadedData fired, duration:', audioRef.current?.duration);
+          if (audioRef.current) {
+            const audioDuration = audioRef.current.duration;
+            setDuration(audioDuration);
+            
+            // Generate word timings if we don't have real ones from ElevenLabs
+            if (currentPlayingText && words.length === 0 && audioDuration > 0) {
+              console.log('🎯 No real word timings available, generating intelligent fallback timings');
+              const generatedTimings = generateWordTimings(currentPlayingText, audioDuration);
+              if (generatedTimings.length > 0) {
+                setWords(generatedTimings);
+                console.log('✅ Fallback word timings set:', generatedTimings.length, 'words');
+              }
+            }
+          }
+        }}
+        onTimeUpdate={() => {
+          if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime);
+          }
+        }}
+        onError={(e) => {
+          console.error('Audio element: onError fired', e);
+          setAudioError('Audio playback failed');
+          setIsPlaying(false);
+        }}
+        onEnded={() => {
+          console.log('Audio element: onEnded fired');
+          setIsPlaying(false);
+          setCurrentTime(0);
+        }}
+      />
     </AudioContext.Provider>
   );
 };

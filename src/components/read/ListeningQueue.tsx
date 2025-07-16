@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef } from 'react';
+import React from 'react';
 import { useQueue } from '@/contexts/QueueContext';
 import { useAudio } from '@/contexts/AudioContext';
 import WordHighlighter from './WordHighlighter';
@@ -31,16 +31,13 @@ const ListeningQueue: React.FC = () => {
   } = useQueue();
 
   const {
-    wordsData,
+    words,
     currentWordIndex,
-    isPlaying,
     currentTime,
     duration,
     formatTime,
     handleWordClick,
   } = useAudio();
-
-  const highlightedWordRef = useRef<HTMLSpanElement>(null);
 
   return (
     <div className="w-full h-full queue-zone-enhanced rounded-xl p-4 gpu-accelerated flex flex-col overflow-hidden shadow-lg">
@@ -90,13 +87,13 @@ const ListeningQueue: React.FC = () => {
               <div className="text-xs text-white/50 font-mono-enhanced font-medium">Try saying:</div>
               <div className="space-y-1">
                 <div className="glass-card px-3 py-2 rounded-lg text-xs text-white/70 font-mono-enhanced">
-                  "I want to learn about trade networks"
+                  &quot;I want to learn about trade networks&quot;
                 </div>
                 <div className="glass-card px-3 py-2 rounded-lg text-xs text-white/70 font-mono-enhanced">
-                  "Add the Mongol Empire section"
+                  &quot;Add the Mongol Empire section&quot;
                 </div>
                 <div className="glass-card px-3 py-2 rounded-lg text-xs text-white/70 font-mono-enhanced">
-                  "Give me a summary of everything"
+                  &quot;Give me a summary of everything&quot;
                 </div>
               </div>
             </div>
@@ -118,12 +115,9 @@ const ListeningQueue: React.FC = () => {
               {/* Word-by-word highlighting display */}
               <div className="glass-card p-3 rounded-lg mb-4 max-h-32 overflow-y-auto custom-scrollbar">
                 <WordHighlighter
-                  wordsData={wordsData}
+                  words={words}
                   currentWordIndex={currentWordIndex}
-                  isPlaying={isPlaying}
-                  content={listeningQueue[currentQueueIndex].content}
                   onWordClick={handleWordClick}
-                  highlightedWordRef={highlightedWordRef}
                   compact={true}
                 />
               </div>

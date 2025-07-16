@@ -5,19 +5,10 @@ import { createPortal } from "react-dom";
 import { VOICE_OPTIONS, VoiceOption } from "@/lib/tts";
 import { useLexioState, useLexioActions } from "@/lib/store";
 
-interface DropdownPosition {
-  horizontal: 'left' | 'right' | 'center';
-  vertical: 'below' | 'above';
-  maxHeight: number;
-}
+
 
 export default function VoiceSelector() {
   const [isOpen, setIsOpen] = useState(false);
-  const [dropdownPosition, setDropdownPosition] = useState<DropdownPosition>({
-    horizontal: 'left',
-    vertical: 'above',
-    maxHeight: 280
-  });
   const [mounted, setMounted] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -45,8 +36,6 @@ export default function VoiceSelector() {
       // Calculate available space
       const spaceAbove = buttonRect.top;
       const spaceBelow = window.innerHeight - buttonRect.bottom;
-      const spaceLeft = buttonRect.left;
-      const spaceRight = window.innerWidth - buttonRect.right;
       
       // Determine vertical position (prefer above for audio player)
       const shouldOpenAbove = spaceAbove >= dropdownHeight + 16;

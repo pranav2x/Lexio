@@ -68,11 +68,14 @@ export async function POST(request: NextRequest) {
     // Validate API key on server-side
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {
+      console.error('❌ ELEVENLABS_API_KEY environment variable is missing');
       return NextResponse.json(
-        { error: 'ELEVENLABS_API_KEY environment variable is required' },
+        { error: 'ELEVENLABS_API_KEY environment variable is required. Please add your ElevenLabs API key to .env.local' },
         { status: 500 }
       );
     }
+
+    console.log('✅ ElevenLabs API key found, initializing client...');
 
     // Parse request body
     const body: TTSRequest = await request.json();
@@ -103,6 +106,8 @@ export async function POST(request: NextRequest) {
         style,
         use_speaker_boost: useSpeakerBoost,
       },
+      output_format: 'mp3_44100_128',
+      apply_text_normalization: 'auto'
     };
 
     // Make API request to ElevenLabs

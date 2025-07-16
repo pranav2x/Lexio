@@ -3,6 +3,8 @@
 import React from 'react';
 import { useAudio } from '@/contexts/AudioContext';
 
+type PlayingSection = 'summary' | `section-${number}` | null;
+
 interface ContentCardProps {
   id: string;
   title: string;
@@ -40,13 +42,38 @@ const ContentCard: React.FC<ContentCardProps> = ({
   index = 0,
   isAnimating = false,
   hasAnimated = false,
-  isCurrentlyPlaying = false,
   additionalSectionsCount = 0,
   onClick
 }) => {
-  const { currentPlayingSection } = useAudio();
+  const { currentPlayingSection, generateAudioForSection, handlePlayPause, isGeneratingAudio, clearAudio } = useAudio();
 
   const isPlaying = currentPlayingSection === id;
+
+  const handleDirectPlay = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card click
+    console.log('🎯 Direct play clicked for:', { id, title, contentLength: content.length });
+    
+    if (!content || content.trim().length === 0) {
+      console.error('❌ No content to play');
+      return;
+    }
+
+    try {
+      // Clear any existing audio first
+      clearAudio();
+      
+      console.log('🎯 Starting direct audio generation...');
+      await generateAudioForSection(id as PlayingSection, content);
+      console.log('✅ Audio generation completed, starting playback...');
+      
+      // Start playing immediately after generation
+      setTimeout(() => {
+        handlePlayPause();
+      }, 200);
+    } catch (error) {
+      console.error('❌ Error in direct play:', error);
+    }
+  };
 
   // Different card content based on type
   const renderCardContent = () => {
@@ -112,13 +139,28 @@ const ContentCard: React.FC<ContentCardProps> = ({
                 {title}
               </h3>
             </div>
-            {type === 'summary' && (
-              <div className="flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Direct Play Button */}
+              <button
+                onClick={handleDirectPlay}
+                disabled={isGeneratingAudio}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 hover:border-white/30 flex items-center justify-center transition-all duration-200 hover:scale-105 group"
+                title="Play directly"
+              >
+                {isGeneratingAudio ? (
+                  <div className="w-3 h-3 animate-spin rounded-full border border-white/60 border-t-white"></div>
+                ) : (
+                  <svg className="w-4 h-4 text-white/80 group-hover:text-white transition-colors" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                )}
+              </button>
+              {type === 'summary' && (
                 <div className="bg-white/10 border border-white/20 rounded-full px-2 py-1">
                   <span className="text-xs text-white/80 font-mono-enhanced font-medium">Summary</span>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
           
           <div className="flex-1 overflow-hidden pr-1">
@@ -136,7 +178,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
             <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
             </svg>
-            <span className="font-mono-enhanced">Click to add to queue</span>
+            <span className="font-mono-enhanced">▶️ Play button | Click card to add to queue</span>
           </div>
         </div>
       </div>

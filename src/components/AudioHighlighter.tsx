@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { generateSpeech, cleanupAudioUrl, estimateTextDuration } from '@/lib/tts';
+import { cleanupAudioUrl } from '@/lib/tts';
 import { useLexioState } from '@/lib/store';
 import VoiceSelector from './VoiceSelector';
 
@@ -42,7 +42,6 @@ const AudioHighlighter: React.FC<AudioHighlighterProps> = ({
 
   // Split content into words
   const words = content.split(/(\s+)/);
-  const textWords = words.filter(word => word.trim() !== '');
 
   useEffect(() => {
     return () => {
@@ -68,7 +67,6 @@ const AudioHighlighter: React.FC<AudioHighlighterProps> = ({
     const averageTimePerWord = totalSpeechTime / speechWords.length;
     
     let currentTime = audioDuration * 0.04; // Start after 4% silence
-    let wordIndex = 0;
 
     allWords.forEach((word, index) => {
       if (word.trim() === '') {

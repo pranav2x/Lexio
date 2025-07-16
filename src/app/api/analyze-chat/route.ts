@@ -101,7 +101,7 @@ async function analyzeMessageWithAI(userMessage: string, availableSections: Arra
   explanation: string;
 }> {
   // Prepare section summaries for AI analysis (truncate content for token efficiency)
-  const sectionSummaries = availableSections.map((section, index) => ({
+  const sectionSummaries = availableSections.map((section) => ({
     index: section.index,
     title: section.title,
     summary: section.content.substring(0, 200) + (section.content.length > 200 ? '...' : ''),

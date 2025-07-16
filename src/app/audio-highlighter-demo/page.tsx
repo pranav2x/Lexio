@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import AudioHighlighter from '@/components/AudioHighlighter';
 import Link from 'next/link';
 
+
 const sampleTexts = [
   {
     title: "Ancient Trade Networks",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { scrapeWebsite, isValidUrl } from "@/lib/firecrawl";
 import { useLexioActions, useLexioState } from "@/lib/store";
@@ -123,22 +123,49 @@ export default function App() {
       return;
     }
 
+    console.log('🔍 URL entered:', { 
+      entered: url.trim(), 
+      cached: DEVELOPER_MODE_DATA.url, 
+      match: url.trim() === DEVELOPER_MODE_DATA.url 
+    });
+
     // Check if URL matches cached content
     if (url.trim() === DEVELOPER_MODE_DATA.url) {
+      console.log('📄 Using cached content for demo URL');
       handleCachedContentLoad();
       return;
     }
 
     // Regular mode - scrape the website
+    console.log('🔍 Starting scraping for URL:', url.trim());
     setLoading(true);
     setError(null);
     setCurrentUrl(url);
 
     try {
       const result = await scrapeWebsite(url); // AI enhancement is now always enabled by default
+      
+      console.log('✅ Scraping successful:', {
+        title: result.title,
+        textLength: result.text?.length || 0,
+        cleanTextLength: result.cleanText?.length || 0,
+        sectionsCount: result.sections?.length || 0
+      });
+      
+      // Validate result has necessary content
+      if (!result.title || (!result.text && !result.cleanText)) {
+        throw new Error('Scraped content is incomplete - missing title or text content');
+      }
+      
       setScrapedData(result);
-      router.push("/read");
+      console.log('🚀 Navigating to /read...');
+      
+      // Force a small delay to ensure state is set
+      setTimeout(() => {
+        router.push("/read");
+      }, 100);
     } catch (err) {
+      console.error('❌ Scraping error:', err);
       setError(err instanceof Error ? err.message : "Failed to scrape website");
     } finally {
       setLoading(false);

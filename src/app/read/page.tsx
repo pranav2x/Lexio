@@ -55,8 +55,17 @@ const ReadPageContent: React.FC = () => {
   }, [scrapedData, hasAnimated]);
 
   useEffect(() => {
+    console.log('📊 Read page loaded, scrapedData status:', {
+      hasData: !!scrapedData,
+      title: scrapedData?.title,
+      textLength: scrapedData?.text?.length || 0,
+      cleanTextLength: scrapedData?.cleanText?.length || 0,
+      sectionsCount: scrapedData?.sections?.length || 0
+    });
+    
     // Redirect to home if no data is available
     if (!scrapedData) {
+      console.log('❌ No scraped data found, redirecting to home');
       router.push("/");
       return;
     }

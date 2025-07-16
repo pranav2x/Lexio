@@ -107,9 +107,20 @@ export async function POST(request: NextRequest) {
 
     if (useLLMExtraction && data.data.json) {
       // Use LLM-extracted content as the primary clean text
-      cleanText = typeof data.data.json === 'string' 
-        ? data.data.json 
-        : JSON.stringify(data.data.json);
+      if (typeof data.data.json === 'string') {
+        try {
+          // Try to parse as JSON first
+          const parsed = JSON.parse(data.data.json);
+          cleanText = parsed.mainContent || data.data.json;
+        } catch {
+          // If parsing fails, use as-is
+          cleanText = data.data.json;
+        }
+      } else if (typeof data.data.json === 'object' && data.data.json.mainContent) {
+        cleanText = data.data.json.mainContent;
+      } else {
+        cleanText = JSON.stringify(data.data.json);
+      }
       cleanText = sanitizeTextForTTS(cleanText);
     }
 

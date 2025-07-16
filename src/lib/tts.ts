@@ -1,5 +1,5 @@
 /**
- * Text-to-Speech integration using ElevenLabs API with development caching
+ * Text-to-Speech integration using ElevenLabs API with real character-level alignment
  */
 
 export interface TTSOptions {
@@ -10,29 +10,96 @@ export interface TTSOptions {
   useSpeakerBoost?: boolean;
 }
 
+export interface WordTiming {
+  text: string;
+  start: number;
+  end: number;
+}
+
 export interface TTSResult {
   audioUrl: string;
   audioBlob: Blob;
   duration?: number;
   fromCache?: boolean;
+  wordTimings?: WordTiming[];
 }
 
 interface CachedAudio {
-  audioData: string; // Base64 encoded audio
+  audioData: string;
   timestamp: number;
   textHash: string;
   voiceSettings: string;
 }
 
-/**
- * Available voice options for selection
- */
 export interface VoiceOption {
   id: string;
   name: string;
   description: string;
   gender: 'male' | 'female';
   accent: string;
+}
+
+interface QueuedRequest {
+  id: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  execute: () => Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resolve: (value: any) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  reject: (error: any) => void;
+  retryCount: number;
+  maxRetries: number;
+}
+
+interface ElevenLabsVoice {
+  voice_id: string;
+  name: string;
+  samples: string[] | null;
+  category: string;
+  fine_tuning: {
+    language: string | null;
+    is_allowed_to_fine_tune: boolean;
+    finetuning_state: string;
+    verification_attempts: number | null;
+    verification_failures: string[];
+    verification_attempts_count: number;
+    slice_ids: string[] | null;
+    manual_verification: string | null;
+    manual_verification_requested: boolean;
+  };
+  labels: Record<string, string>;
+  description: string | null;
+  preview_url: string | null;
+  available_for_tiers: string[];
+  settings: {
+    stability: number;
+    similarity_boost: number;
+    style: number;
+    use_speaker_boost: boolean;
+  } | null;
+  sharing: {
+    status: string;
+    history_item_sample_id: string | null;
+    original_voice_id: string | null;
+    public_owner_id: string | null;
+    liked_by_count: number;
+    cloned_by_count: number;
+    whitelisted_emails: string[] | null;
+    name: string | null;
+    description: string | null;
+    labels: Record<string, string> | null;
+    enabled_in_library: boolean;
+  } | null;
+  high_quality_base_model_ids: string[];
+  safety_control: string | null;
+  voice_verification: {
+    requires_verification: boolean;
+    is_verified: boolean;
+    verification_failures: string[];
+    verification_attempts_count: number;
+    language: string | null;
+  };
+  permission_on_resource: string | null;
 }
 
 export const VOICE_OPTIONS: VoiceOption[] = [
@@ -101,46 +168,127 @@ export const VOICE_OPTIONS: VoiceOption[] = [
   }
 ];
 
-/**
- * Default TTS configuration
- */
 const DEFAULT_TTS_OPTIONS: Required<TTSOptions> = {
-  voiceId: 'dj3G1R1ilKoFKhBnWOzG', // Eryn - Friendly and relatable female voice
+  voiceId: 'dj3G1R1ilKoFKhBnWOzG',
   stability: 0.4,
   similarityBoost: 0.8,
   style: 0.0,
   useSpeakerBoost: true,
 };
 
-/**
- * Development cache settings
- */
 const DEV_CACHE_KEY = 'narrate-dev-tts-cache';
-const DEV_CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-const DEV_CACHE_MAX_SIZE = 15; // Reduced from 50 to prevent quota issues
-const DEV_CACHE_MAX_STORAGE_MB = 3; // Maximum storage size in MB
+const DEV_CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+const DEV_CACHE_MAX_SIZE = 15;
 
-/**
- * Check if we're in development mode
- */
 const isDevelopment = process.env.NODE_ENV === 'development';
 
-/**
- * Generate a simple hash for text content
- */
+class TTSRequestQueue {
+  private queue: QueuedRequest[] = [];
+  private isProcessing = false;
+  private readonly delayBetweenRequests = 1000;
+  private readonly maxRetries = 3;
+
+  async add<T>(id: string, requestFn: () => Promise<T>, maxRetries: number = this.maxRetries): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const queuedRequest: QueuedRequest = {
+        id,
+        execute: requestFn,
+        resolve,
+        reject,
+        retryCount: 0,
+        maxRetries
+      };
+
+      this.queue.push(queuedRequest);
+      console.log(`TTS: Added request to queue (${this.queue.length} pending): ${id}`);
+      
+      this.processQueue();
+    });
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.isProcessing || this.queue.length === 0) {
+      return;
+    }
+
+    this.isProcessing = true;
+    console.log(`TTS: Processing queue (${this.queue.length} requests)`);
+
+    while (this.queue.length > 0) {
+      const request = this.queue.shift()!;
+      
+      try {
+        console.log(`TTS: Executing request: ${request.id} (attempt ${request.retryCount + 1}/${request.maxRetries + 1})`);
+        
+        const result = await request.execute();
+        request.resolve(result);
+        
+        console.log(`TTS: Request completed: ${request.id}`);
+        
+        if (this.queue.length > 0) {
+          console.log(`TTS: Waiting ${this.delayBetweenRequests}ms before next request...`);
+          await new Promise(resolve => setTimeout(resolve, this.delayBetweenRequests));
+        }
+        
+      } catch (error) {
+        console.error(`TTS: Request failed: ${request.id}`, error);
+        
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const isRetryable = errorMessage.includes('429') || 
+                           errorMessage.includes('too_many_concurrent_requests') ||
+                           errorMessage.includes('500') ||
+                           errorMessage.includes('network') ||
+                           errorMessage.includes('fetch');
+        
+        if (isRetryable && request.retryCount < request.maxRetries) {
+          request.retryCount++;
+          const retryDelay = Math.min(1000 * Math.pow(2, request.retryCount), 5000);
+          
+          console.log(`TTS: Retrying request ${request.id} in ${retryDelay}ms (attempt ${request.retryCount + 1}/${request.maxRetries + 1})`);
+          
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          this.queue.unshift(request);
+        } else {
+          console.error(`TTS: Request failed permanently: ${request.id}`);
+          request.reject(error);
+        }
+      }
+    }
+
+    this.isProcessing = false;
+    console.log(`TTS: Queue processing completed`);
+  }
+
+  getQueueLength(): number {
+    return this.queue.length;
+  }
+
+  isQueueProcessing(): boolean {
+    return this.isProcessing;
+  }
+
+  clearQueue(): void {
+    const clearedCount = this.queue.length;
+    this.queue.forEach(request => {
+      request.reject(new Error('Request cancelled - queue cleared'));
+    });
+    this.queue = [];
+    console.log(`TTS: Cleared ${clearedCount} requests from queue`);
+  }
+}
+
+const ttsQueue = new TTSRequestQueue();
+
 function simpleHash(str: string): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
+    hash = hash & hash;
   }
   return Math.abs(hash).toString(36);
 }
 
-/**
- * Generate cache key from text and voice settings
- */
 function generateCacheKey(text: string, options: Required<TTSOptions>): string {
   const textHash = simpleHash(text.trim().toLowerCase());
   const settingsHash = simpleHash(JSON.stringify({
@@ -153,62 +301,6 @@ function generateCacheKey(text: string, options: Required<TTSOptions>): string {
   return `${textHash}-${settingsHash}`;
 }
 
-/**
- * Check storage size and clear old items if needed
- */
-function cleanupCacheIfNeeded(): boolean {
-  if (!isDevelopment || typeof window === 'undefined') return false;
-  
-  try {
-    const cacheData = localStorage.getItem(DEV_CACHE_KEY);
-    if (!cacheData) return true;
-    
-    const cache = JSON.parse(cacheData);
-    const keys = Object.keys(cache);
-    
-    // Check storage size
-    const sizeBytes = new Blob([cacheData]).size;
-    const sizeMB = sizeBytes / (1024 * 1024);
-    
-    // If we're over the size limit, aggressively clean up
-    if (sizeMB > DEV_CACHE_MAX_STORAGE_MB || keys.length > DEV_CACHE_MAX_SIZE) {
-      console.log(`🧹 TTS: Cache cleanup needed (${sizeMB.toFixed(1)}MB, ${keys.length} items)`);
-      
-      // Sort by timestamp and keep only the most recent items
-      const sortedKeys = keys.sort((a, b) => cache[b].timestamp - cache[a].timestamp);
-      const keepCount = Math.min(DEV_CACHE_MAX_SIZE, Math.floor(DEV_CACHE_MAX_SIZE * 0.7)); // Keep 70% of max
-      const keysToKeep = sortedKeys.slice(0, keepCount);
-      
-      const cleanedCache: any = {};
-      keysToKeep.forEach(key => {
-        cleanedCache[key] = cache[key];
-      });
-      
-      localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cleanedCache));
-      
-      const newSizeBytes = new Blob([JSON.stringify(cleanedCache)]).size;
-      const newSizeMB = newSizeBytes / (1024 * 1024);
-      console.log(`✅ TTS: Cache cleaned (${newSizeMB.toFixed(1)}MB, ${keysToKeep.length} items)`);
-      
-      return true;
-    }
-    
-    return true;
-  } catch (error) {
-    console.warn('⚠️ TTS: Error during cache cleanup, clearing entire cache:', error);
-    try {
-      localStorage.removeItem(DEV_CACHE_KEY);
-      return true;
-    } catch (clearError) {
-      console.error('❌ TTS: Failed to clear cache:', clearError);
-      return false;
-    }
-  }
-}
-
-/**
- * Get cached audio from localStorage (development only)
- */
 function getCachedAudio(cacheKey: string): CachedAudio | null {
   if (!isDevelopment || typeof window === 'undefined') return null;
   
@@ -221,10 +313,8 @@ function getCachedAudio(cacheKey: string): CachedAudio | null {
     
     if (!item) return null;
     
-    // Check if cache item is still valid (not expired)
     if (Date.now() - item.timestamp > DEV_CACHE_MAX_AGE) {
-      // Remove expired item
-      delete cache[cacheKey];
+        delete cache[cacheKey];
       localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
       return null;
     }
@@ -236,29 +326,17 @@ function getCachedAudio(cacheKey: string): CachedAudio | null {
   }
 }
 
-/**
- * Cache audio data in localStorage (development only)
- */
 function setCachedAudio(cacheKey: string, audioBlob: Blob, textHash: string, voiceSettings: string): void {
   if (!isDevelopment || typeof window === 'undefined') return;
   
   try {
-    // Check and cleanup cache before adding new item
-    if (!cleanupCacheIfNeeded()) {
-      console.warn('⚠️ TTS: Cache cleanup failed, skipping cache storage');
-      return;
-    }
-    
-    // Convert blob to base64 for storage
     const reader = new FileReader();
     reader.onloadend = () => {
       try {
         const base64Data = reader.result as string;
-        
         const cacheData = localStorage.getItem(DEV_CACHE_KEY);
         const cache = cacheData ? JSON.parse(cacheData) : {};
         
-        // Add new item
         const newItem = {
           audioData: base64Data,
           timestamp: Date.now(),
@@ -266,77 +344,20 @@ function setCachedAudio(cacheKey: string, audioBlob: Blob, textHash: string, voi
           voiceSettings,
         };
         
-        // Check if adding this item would exceed limits
-        const testCache = { ...cache, [cacheKey]: newItem };
-        const testSizeBytes = new Blob([JSON.stringify(testCache)]).size;
-        const testSizeMB = testSizeBytes / (1024 * 1024);
-        
-        // If adding this item would exceed our limits, do additional cleanup
-        if (testSizeMB > DEV_CACHE_MAX_STORAGE_MB || Object.keys(testCache).length > DEV_CACHE_MAX_SIZE) {
-          const keys = Object.keys(cache);
-          if (keys.length > 0) {
-            // Remove oldest items more aggressively
-            const sortedKeys = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
-            const keepCount = Math.max(1, Math.floor(DEV_CACHE_MAX_SIZE * 0.5)); // Keep only 50%
-            const toRemove = sortedKeys.slice(0, sortedKeys.length - keepCount);
-            toRemove.forEach(key => delete cache[key]);
-            console.log(`🧹 TTS: Aggressive cleanup removed ${toRemove.length} items`);
-          }
-        }
-        
-        // Add the new item
         cache[cacheKey] = newItem;
         
-        // Final limit check
-        const finalKeys = Object.keys(cache);
-        if (finalKeys.length > DEV_CACHE_MAX_SIZE) {
-          const sortedKeys = finalKeys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
-          const toRemove = sortedKeys.slice(0, finalKeys.length - DEV_CACHE_MAX_SIZE);
+        const keys = Object.keys(cache);
+        if (keys.length > DEV_CACHE_MAX_SIZE) {
+          const sortedKeys = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
+          const toRemove = sortedKeys.slice(0, keys.length - DEV_CACHE_MAX_SIZE);
           toRemove.forEach(key => delete cache[key]);
         }
         
-        // Try to save with QuotaExceededError handling
-        try {
-          localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
-          
-          const finalSizeBytes = new Blob([JSON.stringify(cache)]).size;
-          const finalSizeMB = finalSizeBytes / (1024 * 1024);
-          console.log(`🎵 TTS: Cached audio (${Object.keys(cache).length}/${DEV_CACHE_MAX_SIZE} items, ${finalSizeMB.toFixed(1)}MB)`);
-          console.log(`💾 TTS: Cache key "${cacheKey}" stored successfully`);
-          
-        } catch (storageError: any) {
-          if (storageError.name === 'QuotaExceededError' || storageError.code === 22) {
-            console.warn('⚠️ TTS: Storage quota exceeded, clearing cache and retrying...');
-            
-            // Clear entire cache and try again with just this item
-            try {
-              localStorage.removeItem(DEV_CACHE_KEY);
-              const freshCache = { [cacheKey]: newItem };
-              localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(freshCache));
-              console.log('✅ TTS: Cache cleared and new item stored');
-            } catch (retryError) {
-              console.error('❌ TTS: Failed to store even after clearing cache:', retryError);
-              // Give up on caching for this item
-            }
-          } else {
-            throw storageError; // Re-throw other errors
-          }
-        }
+        localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
+        console.log(`TTS: Cached audio successfully`);
         
       } catch (error) {
-        console.error('❌ Error caching TTS audio:', error);
-        
-        // If we hit a quota error, try to clear some space
-        if (error instanceof Error && 
-            (error.name === 'QuotaExceededError' || error.message.includes('quota'))) {
-          console.warn('⚠️ TTS: Quota exceeded, attempting emergency cleanup...');
-          try {
-            localStorage.removeItem(DEV_CACHE_KEY);
-            console.log('🧹 TTS: Emergency cache clear completed');
-          } catch (clearError) {
-            console.error('❌ TTS: Emergency cache clear failed:', clearError);
-          }
-        }
+        console.error('Error caching TTS audio:', error);
       }
     };
     reader.readAsDataURL(audioBlob);
@@ -345,9 +366,6 @@ function setCachedAudio(cacheKey: string, audioBlob: Blob, textHash: string, voi
   }
 }
 
-/**
- * Convert base64 data URL to blob
- */
 function dataURLToBlob(dataURL: string): Blob {
   const byteString = atob(dataURL.split(',')[1]);
   const mimeString = dataURL.split(',')[0].split(':')[1].split(';')[0];
@@ -361,38 +379,100 @@ function dataURLToBlob(dataURL: string): Blob {
   return new Blob([ab], { type: mimeString });
 }
 
-/**
- * Generates speech audio from text using our secure API route
- * @param text - The text to convert to speech
- * @param options - TTS configuration options
- * @param selectedVoiceId - Optional voice ID to override default (from voice selector)
- * @returns Promise containing audio URL and blob
- * @throws Error if the request fails
- */
-export async function generateSpeech(
+export async function generateSpeechWithTimings(
   text: string,
   options: TTSOptions = {},
   selectedVoiceId?: string
 ): Promise<TTSResult> {
-  // Validate text
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
-    console.error('❌ generateSpeech called with invalid text:', { text, type: typeof text, length: text?.length });
+    console.error('generateSpeechWithTimings called with invalid text:', { text, type: typeof text, length: text?.length });
     throw new Error('Valid text is required for speech generation');
   }
 
-  console.log('🗣️ generateSpeech called with:', {
+  console.log('generateSpeechWithTimings called with:', {
     textLength: text.length,
     selectedVoiceId
   });
 
-  // Merge options with defaults, with voice override if provided
   const config = { 
     ...DEFAULT_TTS_OPTIONS, 
     ...options,
     ...(selectedVoiceId && { voiceId: selectedVoiceId }),
   };
 
-  // Check development cache first
+  try {
+    const requestId = `tts-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    const data = await ttsQueue.add(requestId, async () => {
+      console.log(`TTS: Making API call for request: ${requestId}`);
+      
+      const response = await fetch('/api/tts-with-timing', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text.trim(),
+          voice_id: config.voiceId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText };
+        }
+        throw new Error(errorData.error || `API error (${response.status}): ${errorText}`);
+      }
+
+      return await response.json();
+    });
+    
+    const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+    const audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
+    const audioUrl = URL.createObjectURL(audioBlob);
+
+    const result: TTSResult = {
+      audioUrl,
+      audioBlob,
+      duration: data.duration,
+      wordTimings: data.wordTimings
+    };
+
+    console.log('Generated speech with word timings:', data.wordTimings?.length || 0, 'words');
+
+    return result;
+
+  } catch (error) {
+    console.error('generateSpeechWithTimings error:', error);
+    throw error;
+  }
+}
+
+export async function generateSpeech(
+  text: string,
+  options: TTSOptions = {},
+  selectedVoiceId?: string
+): Promise<TTSResult> {
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    console.error('generateSpeech called with invalid text:', { text, type: typeof text, length: text?.length });
+    throw new Error('Valid text is required for speech generation');
+  }
+
+  console.log('generateSpeech called with:', {
+    textLength: text.length,
+    selectedVoiceId
+  });
+
+  const config = { 
+    ...DEFAULT_TTS_OPTIONS, 
+    ...options,
+    ...(selectedVoiceId && { voiceId: selectedVoiceId }),
+  };
+
   if (isDevelopment && typeof window !== 'undefined') {
     const cacheKey = generateCacheKey(text, config);
     const cachedAudio = getCachedAudio(cacheKey);
@@ -402,7 +482,7 @@ export async function generateSpeech(
         const audioBlob = dataURLToBlob(cachedAudio.audioData);
         const audioUrl = URL.createObjectURL(audioBlob);
         
-        console.log('🎵 TTS: Using cached audio (saved API credits!)');
+        console.log('TTS: Using cached audio (saved API credits!)');
         
         return {
           audioUrl,
@@ -417,32 +497,40 @@ export async function generateSpeech(
   }
 
   try {
-    // Call our secure API route instead of ElevenLabs directly
-    const response = await fetch('/api/tts', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        text: text.trim(),
-        voiceId: config.voiceId,
-        stability: config.stability,
-        similarityBoost: config.similarityBoost,
-        style: config.style,
-        useSpeakerBoost: config.useSpeakerBoost,
-      }),
+    const requestId = `tts-legacy-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    const audioBlob = await ttsQueue.add(requestId, async () => {
+      console.log(`TTS: Making legacy API call for request: ${requestId}`);
+      
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text.trim(),
+          voiceId: config.voiceId,
+          stability: config.stability,
+          similarityBoost: config.similarityBoost,
+          style: config.style,
+          useSpeakerBoost: config.useSpeakerBoost,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText };
+        }
+        throw new Error(errorData.error || `API error (${response.status}): ${errorText}`);
+      }
+
+      return await response.blob();
     });
 
-    // Check if response is ok
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `API error (${response.status})`);
-    }
-
-    // Get audio blob
-    const audioBlob = await response.blob();
-
-    // Create object URL
     const audioUrl = URL.createObjectURL(audioBlob);
 
     const result: TTSResult = {
@@ -451,7 +539,6 @@ export async function generateSpeech(
       duration: estimateTextDuration(text),
     };
 
-    // Cache the result for development
     if (isDevelopment && typeof window !== 'undefined') {
       const cacheKey = generateCacheKey(text, config);
       const textHash = simpleHash(text);
@@ -462,7 +549,6 @@ export async function generateSpeech(
     return result;
 
   } catch (error) {
-    // Handle different types of errors
     if (error instanceof Error) {
       throw new Error(`Failed to generate speech: ${error.message}`);
     } else {
@@ -471,25 +557,18 @@ export async function generateSpeech(
   }
 }
 
-/**
- * Cleans up an audio URL created by generateSpeech
- * @param audioUrl - The URL to clean up
- */
 export function cleanupAudioUrl(audioUrl: string): void {
   if (audioUrl && audioUrl.startsWith('blob:')) {
     URL.revokeObjectURL(audioUrl);
   }
 }
 
-/**
- * Clear development TTS cache (development only)
- */
 export function clearTTSCache(): boolean {
   if (!isDevelopment || typeof window === 'undefined') return false;
   
   try {
     localStorage.removeItem(DEV_CACHE_KEY);
-    console.log('🗑️ TTS: Development cache cleared');
+    console.log('TTS: Development cache cleared');
     return true;
   } catch (error) {
     console.debug('Error clearing TTS cache:', error);
@@ -497,53 +576,6 @@ export function clearTTSCache(): boolean {
   }
 }
 
-/**
- * Debug function to inspect cache contents (development only)
- */
-export function inspectTTSCache(): void {
-  if (!isDevelopment || typeof window === 'undefined') {
-    console.log('❌ Cache inspection only available in development');
-    return;
-  }
-  
-  try {
-    const cacheData = localStorage.getItem(DEV_CACHE_KEY);
-    console.log('🔍 TTS Cache Inspection:');
-    console.log('📦 Cache Key:', DEV_CACHE_KEY);
-    console.log('📊 Raw Data Exists:', !!cacheData);
-    
-    if (cacheData) {
-      const cache = JSON.parse(cacheData);
-      const keys = Object.keys(cache);
-      console.log('📝 Number of cached items:', keys.length);
-      console.log('🔑 Cache keys:', keys);
-      
-      keys.forEach((key, index) => {
-        const item = cache[key];
-        const age = Date.now() - item.timestamp;
-        const ageMinutes = Math.round(age / (1000 * 60));
-        console.log(`   ${index + 1}. Key: ${key}, Age: ${ageMinutes} minutes`);
-      });
-      
-      const sizeKB = (new Blob([cacheData]).size / 1024).toFixed(1);
-      console.log('💾 Total cache size:', `${sizeKB} KB`);
-    } else {
-      console.log('📝 No cached data found');
-    }
-  } catch (error) {
-    console.error('❌ Error inspecting cache:', error);
-  }
-}
-
-// Make cache inspection available globally in development
-if (isDevelopment && typeof window !== 'undefined') {
-  (window as any).inspectTTSCache = inspectTTSCache;
-  console.log('🔧 Dev Tool Available: Type "inspectTTSCache()" in console to inspect TTS cache');
-}
-
-/**
- * Get TTS cache statistics (development only)
- */
 export function getTTSCacheStats(): { count: number; size: string; enabled: boolean } | null {
   if (!isDevelopment || typeof window === 'undefined') {
     return { count: 0, size: '0 KB', enabled: false };
@@ -568,12 +600,6 @@ export function getTTSCacheStats(): { count: number; size: string; enabled: bool
   }
 }
 
-/**
- * Splits long text into smaller chunks for better TTS processing
- * @param text - The text to split
- * @param maxLength - Maximum length per chunk (default: 2500)
- * @returns Array of text chunks
- */
 export function splitTextForTTS(text: string, maxLength: number = 2500): string[] {
   if (text.length <= maxLength) {
     return [text];
@@ -603,72 +629,34 @@ export function splitTextForTTS(text: string, maxLength: number = 2500): string[
   return chunks;
 }
 
-/**
- * Estimates the duration of text when spoken
- * @param text - The text to estimate
- * @param wordsPerMinute - Speaking rate (default: 150)
- * @returns Estimated duration in seconds
- */
 export function estimateTextDuration(text: string, wordsPerMinute: number = 150): number {
   const wordCount = text.split(/\s+/).length;
-  return Math.ceil((wordCount / wordsPerMinute) * 60);
+  const baseDuration = (wordCount / wordsPerMinute) * 60;
+  
+  // Add duration for punctuation-based pauses
+  const longPauses = (text.match(/[.!?]/g) || []).length * 0.6; // 600ms per sentence end
+  const mediumPauses = (text.match(/[,;:]/g) || []).length * 0.3; // 300ms per clause break
+  const paragraphBreaks = (text.match(/\n\s*\n/g) || []).length * 1.0; // 1s per paragraph break
+  
+  // Add breathing pauses for very long texts (every ~20 words without punctuation)
+  const wordsWithoutMajorPauses = text.replace(/[.!?]/g, '').split(/\s+/).length;
+  const breathingPauses = Math.floor(wordsWithoutMajorPauses / 20) * 0.4;
+  
+  const totalDuration = baseDuration + longPauses + mediumPauses + paragraphBreaks + breathingPauses;
+  
+  console.log('📊 Enhanced duration estimate:', {
+    words: wordCount,
+    baseDuration: baseDuration.toFixed(1),
+    longPauses: longPauses.toFixed(1),
+    mediumPauses: mediumPauses.toFixed(1),
+    paragraphBreaks: paragraphBreaks.toFixed(1),
+    breathingPauses: breathingPauses.toFixed(1),
+    totalDuration: totalDuration.toFixed(1)
+  });
+  
+  return Math.ceil(totalDuration);
 }
 
-interface ElevenLabsVoice {
-  voice_id: string;
-  name: string;
-  samples: string[] | null;
-  category: string;
-  fine_tuning: {
-    language: string | null;
-    is_allowed_to_fine_tune: boolean;
-    finetuning_state: string;
-    verification_attempts: number | null;
-    verification_failures: string[];
-    verification_attempts_count: number;
-    slice_ids: string[] | null;
-    manual_verification: string | null;
-    manual_verification_requested: boolean;
-  };
-  labels: Record<string, string>;
-  description: string | null;
-  preview_url: string | null;
-  available_for_tiers: string[];
-  settings: {
-    stability: number;
-    similarity_boost: number;
-    style: number;
-    use_speaker_boost: boolean;
-  } | null;
-  sharing: {
-    status: string;
-    history_item_sample_id: string | null;
-    original_voice_id: string | null;
-    public_owner_id: string | null;
-    liked_by_count: number;
-    cloned_by_count: number;
-    whitelisted_emails: string[] | null;
-    name: string | null;
-    description: string | null;
-    labels: Record<string, string> | null;
-    enabled_in_library: boolean;
-  } | null;
-  high_quality_base_model_ids: string[];
-  safety_control: string | null;
-  voice_verification: {
-    requires_verification: boolean;
-    is_verified: boolean;
-    verification_failures: string[];
-    verification_attempts_count: number;
-    language: string | null;
-  };
-  permission_on_resource: string | null;
-}
-
-/**
- * Gets available voices from our secure API route
- * @returns Promise containing available voices
- */
 export async function getAvailableVoices(): Promise<ElevenLabsVoice[]> {
   try {
     const response = await fetch('/api/tts', {
@@ -686,4 +674,25 @@ export async function getAvailableVoices(): Promise<ElevenLabsVoice[]> {
     console.error('Failed to fetch voices:', error);
     return [];
   }
+}
+
+export function getTTSQueueStatus() {
+  return {
+    queueLength: ttsQueue.getQueueLength(),
+    isProcessing: ttsQueue.isQueueProcessing()
+  };
+}
+
+export function clearTTSQueue() {
+  ttsQueue.clearQueue();
+}
+
+if (isDevelopment && typeof window !== 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).getTTSQueueStatus = getTTSQueueStatus;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).clearTTSQueue = clearTTSQueue;
+  console.log('Dev Tools Available:');
+  console.log('  - getTTSQueueStatus() - check queue status');
+  console.log('  - clearTTSQueue() - clear pending requests');
 } 

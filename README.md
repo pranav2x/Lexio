@@ -48,16 +48,16 @@ A modern web application built with Next.js 15, TypeScript, and Tailwind CSS, fe
    ```bash
    # Create a .env.local file in the project root
    echo "FIRECRAWL_API_KEY=your_firecrawl_api_key_here" > .env.local
-   echo "NEXT_PUBLIC_ELEVENLABS_API_KEY=your_elevenlabs_api_key_here" >> .env.local
+   echo "ELEVENLABS_API_KEY=your_elevenlabs_api_key_here" >> .env.local
    ```
 
    Or manually create `.env.local` with:
    ```env
    FIRECRAWL_API_KEY=your_firecrawl_api_key_here
-   NEXT_PUBLIC_ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+   ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
    ```
 
-   **Security Note:** The `FIRECRAWL_API_KEY` (without `NEXT_PUBLIC_` prefix) is kept secure on the server and never exposed to the browser. The `NEXT_PUBLIC_ELEVENLABS_API_KEY` is used client-side for TTS functionality.
+   **Security Note:** Both API keys (without `NEXT_PUBLIC_` prefix) are kept secure on the server and never exposed to the browser. All TTS functionality is handled server-side for security.
 
 ### Development
 
@@ -136,13 +136,13 @@ Make sure to set these environment variables:
 # Required for web scraping functionality (server-side only, secure)
 FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 
-# Required for text-to-speech functionality (client-side)
-NEXT_PUBLIC_ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+# Required for text-to-speech functionality (server-side only, secure)
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
 ```
 
 **Important Security Note:**
-- `FIRECRAWL_API_KEY` is server-side only and never exposed to the browser
-- `NEXT_PUBLIC_ELEVENLABS_API_KEY` is client-side and will be visible in the browser (required for TTS)
+- Both `FIRECRAWL_API_KEY` and `ELEVENLABS_API_KEY` are server-side only and never exposed to the browser
+- All TTS functionality is handled securely through server-side API routes
 
 ## 🎨 Customization
 

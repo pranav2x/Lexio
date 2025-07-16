@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { useAudio } from '@/contexts/AudioContext';
 import { useQueue } from '@/contexts/QueueContext';
 import WordHighlighter from './WordHighlighter';
@@ -8,18 +8,18 @@ import WordHighlighter from './WordHighlighter';
 const MaximizedPlayer: React.FC = () => {
   const {
     audioUrl,
+    audioRef,
     isPlaying,
     currentTime,
     duration,
     currentPlayingText,
-    wordsData,
+    words,
     currentWordIndex,
     isMaximized,
     isGeneratingAudio,
     isPreloading,
     setIsMaximized,
     handleSeek,
-    handleStop,
     formatTime,
     playbackRate,
     handleSpeedChange,
@@ -34,24 +34,30 @@ const MaximizedPlayer: React.FC = () => {
     handleControlsPlayPause,
     handleControlsPrevious,
     handleControlsNext,
+    retryCurrentItem,
   } = useQueue();
 
-  const handlePlayPauseClick = () => {
+  const handlePlayPauseClick = async () => {
+    console.log('🔥🎮 MAXIMIZED PLAYER - Play button clicked!', {
+      queueLength: listeningQueue.length,
+      hasHandleControlsPlayPause: !!handleControlsPlayPause,
+      isQueuePlaying,
+      isPlaying
+    });
+    
     if (listeningQueue.length > 0 && handleControlsPlayPause) {
-      handleControlsPlayPause();
+      console.log('🔥🎮 MAXIMIZED PLAYER - Calling handleControlsPlayPause');
+      await handleControlsPlayPause();
     } else {
+      console.log('🔥🎮 MAXIMIZED PLAYER - Calling handlePlayPause');
       handlePlayPause();
     }
   };
 
-  const contentRef = useRef<HTMLDivElement>(null);
-  const highlightedWordRef = useRef<HTMLSpanElement>(null);
+  // const contentRef = useRef<HTMLDivElement>(null);
   const [speedOptions] = useState([0.75, 1, 1.25, 1.5]);
 
   if (!isMaximized) return null;
-
-  const wordCount = wordsData.length;
-  const highlighted = currentWordIndex >= 0 ? wordsData[currentWordIndex] : null;
 
   return (
     <div className="fixed inset-0 bg-black/95 z-50 flex flex-col">
@@ -119,7 +125,7 @@ const MaximizedPlayer: React.FC = () => {
             </button>
 
             {/* Play/Pause Button */}
-                         <button 
+            <button 
                onClick={handlePlayPauseClick} 
                className={`w-16 h-16 rounded-full neon-glow flex items-center justify-center transition-all ${
                  isPlaying ? 'bg-white/15 hover:bg-white/20' : 'btn-premium hover:bg-white/10'
@@ -177,24 +183,75 @@ const MaximizedPlayer: React.FC = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar">
-                         {/* Show content from queue if available, fallback to currentPlayingText, then lastKnownContent */}
-             {(() => {
-               // Get content from current queue item if available
-               const queueItem = isQueuePlaying && currentQueueIndex >= 0 ? listeningQueue[currentQueueIndex] : null;
-               const contentToShow = queueItem?.content || currentPlayingText || lastKnownContent;
+            {/* Show content from queue if available, fallback to currentPlayingText, then lastKnownContent */}
+            {(() => {
+              // Get content from current queue item if available
+              const queueItem = isQueuePlaying && currentQueueIndex >= 0 ? listeningQueue[currentQueueIndex] : null;
+              const contentToShow = queueItem?.content || currentPlayingText || lastKnownContent;
+              
+              // Enhanced debug logging to help identify content issues
+              if (process.env.NODE_ENV === 'development') {
+                console.log('🔍 MaximizedPlayer content check:', {
+                  timestamp: new Date().toISOString(),
+                  isQueuePlaying,
+                  currentQueueIndex,
+                  hasQueueItem: Boolean(queueItem),
+                  queueItemId: queueItem?.id || 'none',
+                  queueItemTitle: queueItem?.title || 'none',
+                  queueItemContentLength: queueItem?.content?.length || 0,
+                  currentPlayingTextLength: currentPlayingText?.length || 0,
+                  lastKnownContentLength: lastKnownContent?.length || 0,
+                  contentToShowLength: contentToShow?.length || 0,
+                  contentToShowPreview: contentToShow?.substring(0, 100) || 'none',
+                  wordsLength: words.length,
+                  currentWordIndex,
+                  isGeneratingAudio,
+                  isPreloading,
+                  isPlaying,
+                  audioUrl: audioUrl ? 'present' : 'none',
+                  hasAudioRef: Boolean(audioRef.current),
+                  audioReadyState: audioRef.current?.readyState || 'no-audio-element',
+                  queueLength: listeningQueue.length
+                });
+              }
               
               if (!contentToShow || contentToShow.trim().length === 0) {
+                // Enhanced error state with more debugging info and retry option
                 return (
                   <div className="text-white/60 text-center font-mono-enhanced">
                     {isGeneratingAudio || isPreloading ? (
                       <>
                         <div className="animate-spin h-6 w-6 border-b-2 border-white/30 mx-auto mb-2"></div>
-                        Loading content...
+                        <div>Loading content...</div>
+                        <div className="text-xs text-white/40 mt-1">
+                          {isGeneratingAudio ? 'Generating audio...' : 'Preparing playback...'}
+                        </div>
                       </>
                     ) : (
                       <>
                         <div className="h-6 w-6 border-2 border-white/30 mx-auto mb-2 rounded"></div>
-                        No content available
+                        <div className="mb-2">No content available</div>
+                        <div className="text-xs text-white/40 mb-3">
+                          This might be a loading issue. Try playing again.
+                        </div>
+                        <button 
+                          onClick={() => {
+                            console.log('🔄 Retry button clicked from MaximizedPlayer');
+                            retryCurrentItem();
+                          }}
+                          className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
+                        >
+                          Retry
+                        </button>
+                        {process.env.NODE_ENV === 'development' && (
+                          <div className="text-xs mt-2 text-white/40 p-2 bg-black/20 rounded">
+                            Debug: queueItem={queueItem?.id || 'none'}<br/>
+                            currentText={currentPlayingText?.substring(0, 50) || 'none'}<br/>
+                            lastKnown={lastKnownContent?.substring(0, 50) || 'none'}<br/>
+                            queueLength={listeningQueue.length}<br/>
+                            currentIndex={currentQueueIndex}
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -212,21 +269,66 @@ const MaximizedPlayer: React.FC = () => {
                         )}
                       </div>
                     )}
-                    {wordsData.length > 0 && isPlaying && (
+                    {words.length > 0 && isPlaying && (
                       <div className="text-center">
-                        <span>Following along: {Math.max(0, currentWordIndex + 1)} of {wordsData.length} words</span>
+                        <span>Following along: {Math.max(0, currentWordIndex + 1)} of {words.length} words</span>
+                      </div>
+                    )}
+                    {words.length === 0 && contentToShow && (
+                      <div className="text-center text-white/40">
+                        Content loaded • {contentToShow.length} characters
+                        {isGeneratingAudio && " • Generating audio..."}
+                        {isPlaying && !isGeneratingAudio && audioUrl && " • Playing without word sync"}
+                        {!isPlaying && !isGeneratingAudio && audioUrl && " • Audio ready"}
+                        {!audioUrl && !isGeneratingAudio && !isPreloading && (
+                          <span className="text-orange-400"> • Text-only mode (audio failed)</span>
+                        )}
+                      </div>
+                    )}
+                    {contentToShow && !queueItem && (
+                      <div className="text-center text-white/40 text-xs">
+                        Showing backup content
                       </div>
                     )}
                   </div>
-                  <WordHighlighter
-                    wordsData={wordsData}
-                    currentWordIndex={currentWordIndex}
-                    isPlaying={isPlaying}
-                    content={contentToShow}
-                    onWordClick={(index) => handleSeek(wordsData[index]?.startTime || 0)}
-                    highlightedWordRef={highlightedWordRef}
-                    textSize="lg"
-                  />
+                  {words.length > 0 ? (
+                    <WordHighlighter
+                      words={words}
+                      currentWordIndex={currentWordIndex}
+                      onWordClick={(index) => handleSeek(words[index]?.start || 0)}
+                      textSize="lg"
+                    />
+                  ) : contentToShow ? (
+                    <WordHighlighter
+                      words={[]} // Empty words array triggers fallback state
+                      currentWordIndex={-1}
+                      textSize="lg"
+                      fallbackText={contentToShow}
+                    />
+                  ) : (
+                    <div className="text-white/90 text-lg leading-relaxed text-center max-w-4xl mx-auto">
+                      {contentToShow.split('\n').map((paragraph, index) => (
+                        <p key={index} className="mb-4 last:mb-0">
+                          {paragraph.trim()}
+                        </p>
+                      )).filter(p => p.props.children)} {/* Filter out empty paragraphs */}
+                      
+                      {/* Show a fallback message if content appears to be corrupted */}
+                      {contentToShow.length < 20 && (
+                        <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                          <p className="text-yellow-400 text-sm">
+                            Content seems incomplete. This might be a loading issue.
+                          </p>
+                          <button 
+                            onClick={() => retryCurrentItem()}
+                            className="mt-2 px-3 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 rounded text-xs"
+                          >
+                            Try reloading
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               );
             })()}

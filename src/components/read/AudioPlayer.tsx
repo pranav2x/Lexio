@@ -113,13 +113,21 @@ const AudioPlayer: React.FC = () => {
 
                   {/* Play/Pause - Main control */}
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      console.log('🔥🎵 BOTTOM PLAYER - Play button clicked!', {
+                        queueLength: listeningQueue.length,
+                        isQueuePlaying,
+                        controlsPlaying,
+                        isPlaying
+                      });
+                      
                       // Maximize when starting playback (smooth transition)
                       if (!(isQueuePlaying ? controlsPlaying : isPlaying)) {
                         setIsMaximized(true);
                       }
                       // Handle playback state change
-                      handleControlsPlayPause();
+                      console.log('🔥🎵 BOTTOM PLAYER - Calling handleControlsPlayPause');
+                      await handleControlsPlayPause();
                     }}
                     disabled={!audioUrl && listeningQueue.length === 0}
                     className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-150 hover:scale-105 neon-glow ${
