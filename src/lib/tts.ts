@@ -106,72 +106,30 @@ interface ElevenLabsVoice {
 
 export const VOICE_OPTIONS: VoiceOption[] = [
   {
-    id: 'dj3G1R1ilKoFKhBnWOzG',
-    name: 'Eryn',
-    description: 'Friendly and relatable',
+    id: 'sarah',
+    name: 'Sarah',
+    description: 'A popular and versatile voice',
     gender: 'female',
     accent: 'American'
   },
   {
-    id: 'g6xIsTj2HwM6VR4iXFCw',
-    name: 'Jessica',
-    description: 'Empathetic and expressive',
+    id: 'heart',
+    name: 'Heart',
+    description: 'A warm and engaging voice',
     gender: 'female',
     accent: 'American'
   },
   {
-    id: 'OYTbf65OHHFELVut7v2H',
-    name: 'Hope',
-    description: 'Bright and uplifting',
-    gender: 'female',
-    accent: 'American'
-  },
-  {
-    id: 'kdmDKE6EkgrWrrykO9Qt',
-    name: 'Alexandra',
-    description: 'Super realistic, conversational',
-    gender: 'female',
-    accent: 'American'
-  },
-  {
-    id: 'L0Dsvb3SLTyegXwtm47J',
-    name: 'Archer',
-    description: 'Grounded and charming',
-    gender: 'male',
-    accent: 'British'
-  },
-  {
-    id: 'HDA9tsk27wYi3uq0fPcK',
-    name: 'Stuart',
-    description: 'Professional and friendly',
-    gender: 'male',
-    accent: 'Australian'
-  },
-  {
-    id: 'UgBBYS2sOqTuMpoF3BR0',
-    name: 'Mark',
-    description: 'Relaxed and laid back',
-    gender: 'male',
-    accent: 'American'
-  },
-  {
-    id: 'vBKc2FfBKJfcZNyEt1n6',
-    name: 'Finn',
-    description: 'Excellent for podcasts',
-    gender: 'male',
-    accent: 'American'
-  },
-  {
-    id: 'pNInz6obpgDQGcFmaJgB',
-    name: 'Adam',
-    description: 'Classic narration voice',
+    id: 'leto',
+    name: 'Leto',
+    description: 'A clear and professional voice',
     gender: 'male',
     accent: 'American'
   }
 ];
 
 const DEFAULT_TTS_OPTIONS: Required<TTSOptions> = {
-  voiceId: 'dj3G1R1ilKoFKhBnWOzG',
+  voiceId: 'sarah',
   stability: 0.4,
   similarityBoost: 0.8,
   style: 0.0,
@@ -527,23 +485,9 @@ export function estimateTextDuration(text: string, wordsPerMinute: number = 150)
   return Math.ceil(totalDuration);
 }
 
-export async function getAvailableVoices(): Promise<ElevenLabsVoice[]> {
-  try {
-    const response = await fetch('/api/tts', {
-      method: 'GET',
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `API error (${response.status})`);
-    }
-
-    const data = await response.json();
-    return data.voices || [];
-  } catch (error) {
-    console.error('Failed to fetch voices:', error);
-    return [];
-  }
+export async function getAvailableVoices(): Promise<VoiceOption[]> {
+  // Return the hardcoded Lemonfox voices
+  return VOICE_OPTIONS;
 }
 
 export function getTTSQueueStatus() {

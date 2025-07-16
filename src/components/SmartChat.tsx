@@ -21,6 +21,250 @@ interface SmartChatProps {
   isProcessing?: boolean;
 }
 
+// Local analysis function (replaces the deleted API)
+function analyzeMessageLocally(userMessage: string, availableSections: Array<{title: string, content: string, index: number}>): {
+  response: string;
+  matchedSections: number[];
+  addedSectionTitles: string[];
+  includeSummary: boolean;
+  explanation: string;
+} {
+  const message = userMessage.toLowerCase();
+  const matchedSections: number[] = [];
+  const addedSectionTitles: string[] = [];
+  let includeSummary = false;
+
+  // Enhanced keyword mappings with more specificity
+  const keywordMappings = {
+    // Trade and Economics - more specific terms
+    trade: {
+      primary: ['trade network', 'trading route', 'silk road', 'commercial network', 'trade route'],
+      secondary: ['trade', 'trading', 'commerce', 'commercial', 'merchant', 'goods', 'exchange', 'market'],
+      context: ['facilitated', 'enabled', 'spread', 'connected', 'linked']
+    },
+    
+    // Technology and Innovation
+    technology: {
+      primary: ['technological innovation', 'technology transfer', 'technological advancement', 'innovation spread'],
+      secondary: ['technology', 'innovation', 'invention', 'technical', 'advancement', 'development'],
+      context: ['facilitated', 'enabled', 'spread', 'transferred', 'adopted', 'diffused']
+    },
+    
+    // Mongol Empire
+    mongol: {
+      primary: ['mongol empire', 'pax mongolica', 'mongol expansion', 'genghis khan'],
+      secondary: ['mongol', 'mongols', 'khan', 'yuan dynasty'],
+      context: ['conquered', 'united', 'controlled', 'expanded']
+    },
+    
+    // Islamic World
+    islamic: {
+      primary: ['islamic expansion', 'dar al-islam', 'islamic golden age', 'abbasid caliphate'],
+      secondary: ['islam', 'islamic', 'muslim', 'caliphate', 'sultanate'],
+      context: ['expansion', 'spread', 'influence', 'culture']
+    },
+    
+    // Environment and Disease
+    environment: {
+      primary: ['black death', 'bubonic plague', 'demographic crisis', 'climate change'],
+      secondary: ['plague', 'disease', 'epidemic', 'climate', 'environment', 'weather'],
+      context: ['devastated', 'affected', 'spread', 'killed', 'changed']
+    },
+    
+    // General learning requests
+    everything: ['everything', 'all', 'complete', 'full', 'entire', 'whole'],
+    summary: ['summary', 'overview', 'brief', 'summarize', 'main points', 'key points']
+  };
+
+  // Check for summary requests
+  if (keywordMappings.summary.some(keyword => message.includes(keyword))) {
+    includeSummary = true;
+  }
+
+  // Check for "everything" requests
+  if (keywordMappings.everything.some(keyword => message.includes(keyword))) {
+    // Add all available sections
+    availableSections.forEach(section => {
+      matchedSections.push(section.index);
+      addedSectionTitles.push(section.title);
+    });
+    includeSummary = true;
+    
+    return {
+      response: `Perfect! I've added all available content to your queue (${availableSections.length} sections + summary). You'll get the complete learning experience about this topic!`,
+      matchedSections,
+      addedSectionTitles,
+      includeSummary,
+      explanation: "User requested all available content"
+    };
+  }
+
+  // Enhanced contextual analysis
+  const getContextualRelevance = (userMessage: string, sectionText: string): number => {
+    let relevanceScore = 0;
+    const userWords = userMessage.toLowerCase().split(/\s+/).filter(word => word.length > 3);
+    const sectionWords = sectionText.toLowerCase().split(/\s+/);
+    
+    // Check for phrase-level matches (higher weight)
+    const userPhrases = [];
+    for (let i = 0; i < userWords.length - 1; i++) {
+      userPhrases.push(`${userWords[i]} ${userWords[i + 1]}`);
+    }
+    
+    userPhrases.forEach(phrase => {
+      if (sectionText.toLowerCase().includes(phrase)) {
+        relevanceScore += 15; // High score for phrase matches
+      }
+    });
+    
+    // Check for conceptual relationships
+    const conceptMappings = {
+      'trade networks': ['economic exchange', 'commercial routes', 'merchant activity', 'goods flow'],
+      'technological innovation': ['new technology', 'inventions', 'technical advancement', 'knowledge transfer'],
+      'facilitated': ['enabled', 'promoted', 'encouraged', 'supported', 'helped spread'],
+      'during this period': ['at this time', 'in this era', 'throughout this period', 'during these years']
+    };
+    
+    Object.entries(conceptMappings).forEach(([userConcept, relatedTerms]) => {
+      if (userMessage.includes(userConcept)) {
+        relatedTerms.forEach(term => {
+          if (sectionText.toLowerCase().includes(term)) {
+            relevanceScore += 10;
+          }
+        });
+      }
+    });
+    
+    return relevanceScore;
+  };
+
+  // Score each section with enhanced logic
+  const sectionScores = availableSections.map(section => {
+    let score = 0;
+    const sectionText = `${section.title} ${section.content}`.toLowerCase();
+    
+    // Contextual relevance scoring
+    score += getContextualRelevance(userMessage, sectionText);
+    
+    // Enhanced keyword category scoring
+    Object.entries(keywordMappings).forEach(([category, keywords]) => {
+      if (category === 'everything' || category === 'summary') return;
+      
+      const keywordData = keywords as any;
+      if (typeof keywordData === 'object' && keywordData.primary) {
+        // Check primary keywords (highest weight)
+        const userHasPrimary = keywordData.primary.some((keyword: string) => message.includes(keyword));
+        const sectionHasPrimary = keywordData.primary.some((keyword: string) => sectionText.includes(keyword));
+        
+        if (userHasPrimary && sectionHasPrimary) {
+          score += 25; // Very high score for primary matches
+        }
+        
+        // Check secondary keywords (medium weight)
+        const userHasSecondary = keywordData.secondary.some((keyword: string) => message.includes(keyword));
+        const sectionHasSecondary = keywordData.secondary.some((keyword: string) => sectionText.includes(keyword));
+        
+        if (userHasSecondary && sectionHasSecondary) {
+          score += 15; // Medium score for secondary matches
+        }
+        
+        // Check context keywords (bonus if both primary/secondary and context match)
+        if ((userHasPrimary || userHasSecondary) && (sectionHasPrimary || sectionHasSecondary)) {
+          const userHasContext = keywordData.context.some((keyword: string) => message.includes(keyword));
+          const sectionHasContext = keywordData.context.some((keyword: string) => sectionText.includes(keyword));
+          
+          if (userHasContext && sectionHasContext) {
+            score += 10; // Bonus for contextual relevance
+          }
+        }
+      } else {
+        // Handle simple keyword arrays (backward compatibility)
+        const keywordArray = Array.isArray(keywordData) ? keywordData : [];
+        const userHasKeyword = keywordArray.some((keyword: string) => message.includes(keyword));
+        const sectionHasKeyword = keywordArray.some((keyword: string) => sectionText.includes(keyword));
+        
+        if (userHasKeyword && sectionHasKeyword) {
+          score += 10;
+        }
+      }
+    });
+
+    // Title relevance bonus
+    const titleWords = section.title.toLowerCase().split(/\s+/);
+    const userWords = message.split(/\s+/).filter(word => word.length > 3);
+    
+    userWords.forEach(word => {
+      if (titleWords.some(titleWord => titleWord.includes(word) || word.includes(titleWord))) {
+        score += 8;
+      }
+    });
+
+    // Penalize sections that seem irrelevant based on negative indicators
+    const negativeIndicators = [
+      { userHas: ['trade', 'network'], sectionHas: ['religion', 'spiritual', 'prayer'], penalty: -15 },
+      { userHas: ['technology', 'innovation'], sectionHas: ['political', 'governance', 'administration'], penalty: -10 },
+      { userHas: ['economic'], sectionHas: ['warfare', 'military', 'battle'], penalty: -8 }
+    ];
+    
+    negativeIndicators.forEach(indicator => {
+      const userHasTerms = indicator.userHas.some(term => message.includes(term));
+      const sectionHasTerms = indicator.sectionHas.some(term => sectionText.includes(term));
+      
+      if (userHasTerms && sectionHasTerms) {
+        score += indicator.penalty;
+      }
+    });
+
+    return { section, score };
+  });
+
+  // Sort by score and apply more selective filtering
+  const sortedSections = sectionScores
+    .filter(item => item.score > 10) // Higher threshold for relevance
+    .sort((a, b) => b.score - a.score);
+
+  // More selective section addition
+  const minScore = sortedSections.length > 0 ? Math.max(sortedSections[0].score * 0.6, 15) : 15;
+  
+  for (const item of sortedSections) {
+    if (matchedSections.length < 3 && item.score >= minScore) { // Limit to max 3 sections
+      matchedSections.push(item.section.index);
+      addedSectionTitles.push(item.section.title);
+    }
+  }
+
+  // If no high-quality matches, try to find at least one decent match
+  if (matchedSections.length === 0 && sortedSections.length > 0) {
+    const bestMatch = sortedSections[0];
+    if (bestMatch.score > 5) {
+      matchedSections.push(bestMatch.section.index);
+      addedSectionTitles.push(bestMatch.section.title);
+    }
+  }
+
+  // Generate more contextual responses
+  let response = "";
+  if (matchedSections.length === 0) {
+    response = "I couldn't find content that closely matches your specific request. Try being more specific with key terms, or say 'everything' to explore all available content.";
+  } else if (matchedSections.length === 1) {
+    response = `Great! I found 1 highly relevant section: "${addedSectionTitles[0]}". This content directly relates to your question.`;
+  } else {
+    response = `Perfect! I found ${matchedSections.length} sections that are highly relevant to your request: ${addedSectionTitles.join(", ")}. These focus specifically on what you asked about.`;
+  }
+
+  if (includeSummary) {
+    response += " I've also included the summary to give you a good overview.";
+  }
+
+  return {
+    response,
+    matchedSections,
+    addedSectionTitles,
+    includeSummary,
+    explanation: `Enhanced contextual analysis with relevance scoring (${matchedSections.length} sections matched)`
+  };
+}
+
 export default function SmartChat({ 
   availableSections, 
   onAddToQueue, 
@@ -78,50 +322,31 @@ export default function SmartChat({
       // Single concise processing message
       await addSystemMessage("🔍 Analyzing request and searching content...");
 
-      // Call our AI analysis API
-      const response = await fetch('/api/analyze-chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userMessage: userMessage.content,
-          availableSections: availableSections.map(section => ({
-            title: section.title,
-            content: section.content.substring(0, 500), // Send first 500 chars for analysis
-            index: section.index
-          }))
-        }),
-      });
+      // Use local analysis instead of API call
+      const analysis = analyzeMessageLocally(userMessage.content, availableSections);
 
-      const data = await response.json();
-
-      if (data.success) {
-        if (data.matchedSections.length > 0) {
-          // Show simple result and add to queue
-          if (data.addedSectionTitles && data.addedSectionTitles.length > 0) {
-            await addSystemMessage(`✅ Added ${data.matchedSections.length} section${data.matchedSections.length > 1 ? 's' : ''} to your queue${data.includeSummary ? ' + summary' : ''}!`, data.addedSectionTitles);
-          }
-          
-          // Add matched sections to queue
-          onAddToQueue(data.matchedSections, data.explanation);
-        } else {
-          await addSystemMessage("🔍 No matching sections found for your request.");
+      if (analysis.matchedSections.length > 0) {
+        // Show simple result and add to queue
+        if (analysis.addedSectionTitles && analysis.addedSectionTitles.length > 0) {
+          await addSystemMessage(`✅ Added ${analysis.matchedSections.length} section${analysis.matchedSections.length > 1 ? 's' : ''} to your queue${analysis.includeSummary ? ' + summary' : ''}!`, analysis.addedSectionTitles);
         }
         
-        // Add summary if requested
-        if (data.includeSummary) {
-          onAddSummary();
-        }
-
-        // Show only a concise final response (limit to 150 chars)
-        const shortResponse = data.response.length > 150 
-          ? data.response.substring(0, 150) + "..." 
-          : data.response;
-        await addSystemMessage(shortResponse);
+        // Add matched sections to queue
+        onAddToQueue(analysis.matchedSections, analysis.explanation);
       } else {
-        throw new Error(data.response || 'Failed to analyze message');
+        await addSystemMessage("🔍 No matching sections found for your request.");
       }
+      
+      // Add summary if requested
+      if (analysis.includeSummary) {
+        onAddSummary();
+      }
+
+      // Show only a concise final response (limit to 150 chars)
+      const shortResponse = analysis.response.length > 150 
+        ? analysis.response.substring(0, 150) + "..." 
+        : analysis.response;
+      await addSystemMessage(shortResponse);
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage: ChatMessage = {

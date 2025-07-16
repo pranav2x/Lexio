@@ -33,7 +33,7 @@ export const useLexioStore = create<LexioState>()(
       isLoading: false,
       error: null,
       currentUrl: null,
-      selectedVoiceId: 'dj3G1R1ilKoFKhBnWOzG', // Default to Eryn
+      selectedVoiceId: 'sarah', // Default to Sarah
       
       // Actions
       setScrapedData: (data) => set({ scrapedData: data }),
