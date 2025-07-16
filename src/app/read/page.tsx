@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLexioState, useLexioActions } from "@/lib/store";
 import { extractSummary } from "@/lib/firecrawl";
-import { estimateTextDuration } from "@/lib/tts";
+import { estimateTextDuration, fetchAndCacheSpeech } from "@/lib/tts";
 
 // Context Providers
 import { AudioProvider } from "@/contexts/AudioContext";
@@ -27,7 +27,7 @@ import { useAudio } from "@/contexts/AudioContext";
 // Main ReadPage Content Component
 const ReadPageContent: React.FC = () => {
   const router = useRouter();
-  const { scrapedData, currentUrl } = useLexioState();
+  const { scrapedData, currentUrl, selectedVoiceId } = useLexioState();
   const { clearAll } = useLexioActions();
   
   // Animation state for cards
@@ -75,6 +75,35 @@ const ReadPageContent: React.FC = () => {
       clearAudio();
     };
   }, [scrapedData, router, clearAudio]);
+
+  // Pre-warm TTS cache for key content sections
+  useEffect(() => {
+    const prewarmCache = async () => {
+      if (!scrapedData) return;
+
+      console.log('🔥 Pre-warming TTS cache for key content...');
+
+      const sectionsToCache = [
+        scrapedData.sections.find(s => s.title.includes("Trade Networks")),
+        scrapedData.sections.find(s => s.title.includes("Technological Innovation")),
+        { title: "Summary", content: extractSummary(scrapedData.cleanText || scrapedData.text, 1000) }
+      ].filter(Boolean); // Filter out any undefined sections
+
+      for (const section of sectionsToCache) {
+        if (section && section.content) {
+          try {
+            // This call will check the cache and only fetch if necessary
+            await fetchAndCacheSpeech(section.content, {}, selectedVoiceId);
+            console.log(`✅ Cache pre-warmed or verified for: ${section.title}`);
+          } catch (error) {
+            console.error(`Failed to pre-warm cache for ${section.title}:`, error);
+          }
+        }
+      }
+    };
+
+    prewarmCache();
+  }, [scrapedData, selectedVoiceId]); // Depend on scrapedData and voice ID
 
   const handleBack = () => {
     clearAudio();

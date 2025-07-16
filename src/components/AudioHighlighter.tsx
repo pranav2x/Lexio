@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { cleanupAudioUrl } from '@/lib/tts';
+import { generateSpeech, cleanupAudioUrl } from '@/lib/tts';
 import { useLexioState } from '@/lib/store';
 import VoiceSelector from './VoiceSelector';
 

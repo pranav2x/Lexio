@@ -1,9 +1,10 @@
 "use client";
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { generateSpeechWithTimings, cleanupAudioUrl } from '@/lib/tts';
+import { generateSpeech } from '@/lib/tts';
 import { useLexioState } from '@/lib/store';
 import { useAudio } from './AudioContext';
+import { getDemoData } from '@/lib/demo-data';
 
 type PlayingSection = 'summary' | `section-${number}` | null;
 
@@ -178,12 +179,11 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
     
     const item = listeningQueue[index];
     
-    console.log('🎯 Playing queue item with enhanced sequence:', {
+    console.log('🎯 Playing queue item:', {
       index,
       id: item.id,
       title: item.title,
-      contentLength: item.content?.length || 0,
-      hasContent: Boolean(item.content && item.content.trim().length > 0)
+      contentLength: item.content?.length || 0
     });
     
     // Validate content before proceeding
@@ -191,41 +191,59 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       console.error('Queue item has no content:', item);
       return;
     }
+
+    // --- DEMO MODE TEMPORARILY DISABLED FOR DATA COLLECTION ---
+    // 
+    // AFTER COLLECTING DATA: 
+    // 1. Paste your API responses into src/lib/demo-data.ts
+    // 2. Uncomment the block below (remove the // from each line)
+    // 3. Comment out or delete this instruction block
+    // 4. Your demo mode will be active!
+
+    // const demoData = getDemoData(item.id);
+    // if (demoData) {
+    //   console.log(`🎬 DEMO MODE: Loading hardcoded audio for: ${item.id}`);
+    //   setIsPreloading(true);
+    //   setItemLoading(item.id, true);
+    //   setCurrentPlayingText(item.content);
+    //   setLastKnownContent(item.content);
+    //   setIsQueuePlaying(true);
+    //   setCurrentQueueIndex(index);
+    //   setCurrentPlayingSection(item.id as PlayingSection);
+    //   clearAudio();
+    //   await new Promise(resolve => setTimeout(resolve, 1500));
+    //   const cachedAudioUrl = URL.createObjectURL(demoData.audioBlob);
+    //   setAudioUrl(cachedAudioUrl);
+    //   setWords(demoData.wordTimings);
+    //   setIsPreloading(false);
+    //   setItemLoading(item.id, false);
+    //   console.log('✅ Demo audio loaded successfully');
+    //   return;
+    // }
+
+    // --- END OF DEMO LOGIC ---
+
+    console.log(`🌐 LIVE MODE: Making API call for: ${item.id}`);
     
-    // Step 1: Clear any existing error and set loading state immediately
-    console.log('🔥 Step 1: Setting loading state');
+    // Clear any existing error and set loading state
     clearItemError(item.id);
     setItemLoading(item.id, true);
     setIsPreloading(true);
     
-    // Step 2: Immediately set text content and backup (critical for UI consistency)
-    console.log('🔥 Step 2: Setting text content immediately:', {
-      contentLength: item.content.length,
-      contentPreview: item.content.substring(0, 100) + '...'
-    });
+    // Set text content and queue state
     setCurrentPlayingText(item.content);
-    setLastKnownContent(item.content); // Backup to prevent "No content available" flashing
-    
-    // Set queue state
+    setLastKnownContent(item.content);
     setIsQueuePlaying(true);
     setCurrentQueueIndex(index);
     setCurrentPlayingSection(item.id as PlayingSection);
     
-    // Step 3: Clean up previous audio using clearAudio
-    console.log('🔥 Step 3: Cleaning up previous audio');
-    clearAudio(); // This clears audioUrl, words, and pauses current audio
-    
-    // Reset controls state
-    setControlsPlaying(false);
-    setControlsProgress(0);
-    setControlsCurrentTime(0);
+    // Clean up previous audio
+    clearAudio();
     
     try {
-      // Step 4: Generate new speech audio
-      console.log('🔥 Step 4: Generating speech audio for content length:', item.content.length);
-      console.log('Item details:', { id: item.id, title: item.title, voiceId: selectedVoiceId });
+      console.log('🎯 Generating speech audio for:', item.id);
       
-      const result = await generateSpeechWithTimings(item.content, {}, selectedVoiceId);
+      const result = await generateSpeech(item.content, {}, selectedVoiceId);
       
       if (!result.audioUrl) {
         throw new Error("No audio URL generated");
@@ -233,175 +251,40 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
       
       console.log('✅ Audio generated successfully');
       
-      // Set real word timings from ElevenLabs if available
+      // Set word timings if available
       if (result.wordTimings && result.wordTimings.length > 0) {
-        console.log('🎯 Setting real word timings from ElevenLabs:', {
-          wordTimingsCount: result.wordTimings.length,
-          firstWord: result.wordTimings[0]?.text,
-          lastWord: result.wordTimings[result.wordTimings.length - 1]?.text
-        });
         const wordData = result.wordTimings.map((timing) => ({
           text: timing.text,
           start: timing.start,
           end: timing.end
         }));
         setWords(wordData);
-      } else {
-        console.log('⚠️ No word timings from ElevenLabs - will use fallback generation when audio loads');
-        // Don't set empty words here - let AudioContext generate fallback timings
       }
       
-      // Step 5: Set the new audioUrl (AudioContext will handle loading via useEffect)
-      console.log('🔥 Step 5: Setting new audio URL - AudioContext will handle loading');
+      // Set the audio URL - AudioContext onCanPlay will handle automatic playback
       setAudioUrl(result.audioUrl);
-      
-      // Step 6: Wait for audio to load and then begin playback
-      console.log('🔥 Step 6: Waiting for audio to load and begin playback');
-      
-      if (audioRef.current) {
-        // AudioContext will handle loading via onLoadedData event
-        // We just need to wait for canplay and then start playback
-        await new Promise<void>((resolve, reject) => {
-          const audio = audioRef.current!;
-          let timeoutId: NodeJS.Timeout;
-          
-          const onCanPlay = () => {
-            console.log('✅ Audio can play - stopping preloading and starting playback');
-            clearTimeout(timeoutId);
-            audio.removeEventListener('canplay', onCanPlay);
-            audio.removeEventListener('error', onError);
-            
-            setIsPreloading(false);
-            
-            // Start playback
-            audio.play()
-              .then(() => {
-                setControlsPlaying(true);
-                console.log('✅ Playback started successfully');
-                resolve();
-              })
-              .catch((playError) => {
-                console.error('❌ Play failed:', playError);
-                setControlsPlaying(false);
-                reject(playError);
-              });
-          };
-          
-          const onError = (e: Event) => {
-            console.error('❌ Audio loading error:', e);
-            clearTimeout(timeoutId);
-            audio.removeEventListener('canplay', onCanPlay);
-            audio.removeEventListener('error', onError);
-            setIsPreloading(false);
-            reject(new Error('Audio loading failed'));
-          };
-          
-          // Set up event listeners
-          audio.addEventListener('canplay', onCanPlay, { once: true });
-          audio.addEventListener('error', onError, { once: true });
-          
-          // Timeout after 30 seconds
-          timeoutId = setTimeout(() => {
-            audio.removeEventListener('canplay', onCanPlay);
-            audio.removeEventListener('error', onError);
-            setIsPreloading(false);
-            reject(new Error('Audio loading timeout'));
-          }, 30000);
-          
-          // If already ready, trigger immediately
-          if (audio.readyState >= 4) {
-            onCanPlay();
-          }
-        });
-      } else {
-        console.error('❌ No audio element available');
-        setIsPreloading(false);
-        throw new Error('No audio element available');
-      }
+      setIsPreloading(false);
+      setItemLoading(item.id, false);
       
     } catch (error) {
-      console.error('❌ Error generating audio:', error);
-      setIsPreloading(false);
-      setControlsPlaying(false);
-      
-      // Provide more detailed error information
-      let errorMessage = 'Unknown error';
-      let errorCode = '';
-      let shouldRetry = false;
-      
-      if (error instanceof Error) {
-        errorMessage = error.message;
-        
-        // Check for specific error types
-        if (errorMessage.includes('429') || errorMessage.includes('too_many_concurrent_requests')) {
-          errorMessage = 'Rate limit exceeded. Please try again shortly.';
-          errorCode = '429';
-          shouldRetry = true;
-        } else if (errorMessage.includes('401') || errorMessage.includes('invalid_api_key')) {
-          errorMessage = 'API key error. Please check configuration.';
-          errorCode = '401';
-        } else if (errorMessage.includes('500')) {
-          errorMessage = 'Server error. Please try again.';
-          errorCode = '500';
-          shouldRetry = true;
-        } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
-          errorMessage = 'Network error. Check your connection.';
-          shouldRetry = true;
-        }
-      }
-      
-      // Set error state for this specific queue item (don't stop entire queue)
+      const errorMessage = error instanceof Error ? error.message : 'Audio generation failed';
+      console.error('❌ TTS Generation failed for item:', item.id, error);
+
+      // --- START OF CRITICAL FIX ---
+
+      // 1. Immediately clear all audio-related state to prevent stale playback.
+      clearAudio();
+
+      // 2. Set a specific error on the queue item for the UI to display.
       setItemError(item.id, errorMessage);
-      
-      console.error('❌ TTS Generation failed:', {
-        error: errorMessage,
-        errorCode,
-        shouldRetry,
-        itemId: item.id,
-        contentLength: item.content.length,
-        selectedVoiceId,
-        fullError: error instanceof Error ? {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        } : error
-      });
-      
-      // Don't stop the entire queue, just this item failed
-      // But make sure the text is still displayed even if audio fails
-      setWords([]);
-      
-      // Set a basic fallback state so the UI still shows content
-      if (audioRef.current) {
-        // Clear any existing audio
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-        if (audioRef.current.src) {
-          cleanupAudioUrl(audioRef.current.src);
-          audioRef.current.removeAttribute('src');
-        }
-      }
-      
-      // Keep the text content visible even if audio generation failed
-      setCurrentPlayingText(item.content);
-      setLastKnownContent(item.content);
-      
-      // Set the audio URL to null and ensure preloading is stopped
-      setAudioUrl(null);
+
+      // 3. Ensure all loading states are turned off.
       setIsPreloading(false);
-      
-      // Don't throw - let the UI show the content even without audio
-      console.log('⚠️ Continuing with text-only mode due to TTS error:', {
-        timestamp: new Date().toISOString(),
-        itemId: item.id,
-        currentPlayingTextLength: item.content.length,
-        lastKnownContentLength: item.content.length,
-        wordsSet: false,
-        errorType: errorCode,
-        shouldRetry
-      });
+      setItemLoading(item.id, false);
+
+      // --- END OF CRITICAL FIX ---
     }
-      }, [listeningQueue, selectedVoiceId, audioRef, setIsQueuePlaying, setCurrentQueueIndex, setCurrentPlayingText, setCurrentPlayingSection, setWords, setAudioUrl, setIsPreloading, setControlsPlaying, clearItemError, setItemError, setItemLoading, clearAudio]);
+  }, [listeningQueue, selectedVoiceId, setIsQueuePlaying, setCurrentQueueIndex, setCurrentPlayingText, setCurrentPlayingSection, setWords, setAudioUrl, setIsPreloading, clearItemError, setItemError, setItemLoading, clearAudio]);
 
   const playQueue = useCallback(async () => {
     if (listeningQueue.length === 0) return;
@@ -464,56 +347,25 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
   }, [currentQueueIndex, listeningQueue, isQueuePlaying, playQueueItem, clearItemError]);
 
   const handleControlsPlayPause = useCallback(async () => {
-    console.log('🎮🔥 PLAY BUTTON CLICKED - handleControlsPlayPause called:', {
-      timestamp: new Date().toISOString(),
+    console.log('🎮 Play/Pause button clicked:', {
       queueLength: listeningQueue.length,
       isQueuePlaying,
       isPlaying,
-      currentQueueIndex,
-      audioRefCurrent: !!audioRef.current,
-      audioSrc: audioRef.current?.src || 'No source',
-      audioReadyState: audioRef.current?.readyState || 'No audio element',
-      queueItems: listeningQueue.map(item => ({ 
-        id: item.id, 
-        title: item.title, 
-        contentLength: item.content?.length || 0,
-        hasContent: Boolean(item.content && item.content.trim().length > 0)
-      }))
+      currentQueueIndex
     });
     
     // If no items in queue, nothing to do
     if (listeningQueue.length === 0) {
-      console.log('⚠️🔥 No items in queue, cannot play');
+      console.log('⚠️ No items in queue, cannot play');
       return;
     }
 
     // If queue is not playing yet, start it
     if (!isQueuePlaying) {
-      console.log('🎮🔥 Starting queue playback - isQueuePlaying is false');
-      console.log('🎮🔥 Queue contents:', listeningQueue.map(item => ({ id: item.id, title: item.title, contentLength: item.content?.length })));
+      console.log('🎮 Starting queue playback');
       setIsMaximized(true);
-      console.log('🎮🔥 About to call playQueue()...');
-      try {
-        await playQueue();
-        console.log('✅🔥 playQueue() completed successfully');
-      } catch (error) {
-        console.error('❌🔥 Error in playQueue():', error);
-      }
+      await playQueue();
       return;
-    }
-
-    // If queue is playing but no valid audio, retry current item
-    if (isQueuePlaying && (!audioRef.current?.src || audioRef.current.src === 'null' || audioRef.current.src === '')) {
-      console.log('🔄 Retrying current queue item due to missing audio');
-      const validIndex = Math.max(0, currentQueueIndex);
-      if (validIndex < listeningQueue.length) {
-        try {
-          await playQueueItem(validIndex);
-          return;
-        } catch (error) {
-          console.error('❌ Error retrying queue item:', error);
-        }
-      }
     }
 
     // If queue is playing, toggle play/pause of current audio
@@ -522,106 +374,21 @@ export const QueueProvider: React.FC<QueueProviderProps> = ({ children }) => {
         if (isPlaying) {
           console.log('⏸️ Pausing audio');
           audioRef.current.pause();
-          setControlsPlaying(false);
         } else {
           console.log('▶️ Resuming audio playback');
-          
-          // Check if audio element has a valid source
-          if (!audioRef.current.src || audioRef.current.src === 'null' || audioRef.current.src === '') {
-            console.log('⚠️ No valid audio source, regenerating...');
-            // If no valid source, try to play the current queue item again
-            const validIndex = Math.max(0, currentQueueIndex);
-            if (validIndex < listeningQueue.length) {
-              await playQueueItem(validIndex);
-              return;
-            }
-          }
-          
-          // Check if audio is ready to play
-          if (audioRef.current.readyState < 2) {
-            console.log('⏳ Audio not ready, waiting for load...');
-            setIsPreloading(true);
-            
-            // Wait for audio to load
-            await new Promise((resolve, reject) => {
-              const audio = audioRef.current!;
-              const timeout = setTimeout(() => {
-                reject(new Error('Audio load timeout'));
-              }, 10000); // 10 second timeout
-              
-              const onLoadedData = () => {
-                clearTimeout(timeout);
-                audio.removeEventListener('loadeddata', onLoadedData);
-                audio.removeEventListener('error', onError);
-                resolve(void 0);
-              };
-              
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const onError = (e: any) => {
-                clearTimeout(timeout);
-                audio.removeEventListener('loadeddata', onLoadedData);
-                audio.removeEventListener('error', onError);
-                reject(e);
-              };
-              
-              audio.addEventListener('loadeddata', onLoadedData);
-              audio.addEventListener('error', onError);
-              
-              // If already loaded
-              if (audio.readyState >= 2) {
-                clearTimeout(timeout);
-                resolve(void 0);
-              }
-            });
-            
-            setIsPreloading(false);
-          }
-          
-          console.log('🔍 Audio element details before play:', {
-            src: audioRef.current.src,
-            readyState: audioRef.current.readyState,
-            duration: audioRef.current.duration,
-            currentTime: audioRef.current.currentTime,
-            paused: audioRef.current.paused
-          });
-          
           await audioRef.current.play();
-          setControlsPlaying(true);
-          console.log('✅ Audio play() call succeeded');
         }
       } catch (error) {
         console.error('❌ Error toggling playback:', error);
-        console.error('❌ Error details:', {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          name: (error as any).name,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          message: (error as any).message,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          code: (error as any).code
-        });
-        setControlsPlaying(false);
-        setIsPreloading(false);
         
         // If there's a playback error, try to regenerate the audio
-        if (!isPlaying && currentQueueIndex >= 0 && currentQueueIndex < listeningQueue.length) {
+        if (currentQueueIndex >= 0 && currentQueueIndex < listeningQueue.length) {
           console.log('🔄 Playback error, attempting to regenerate audio...');
-          try {
-            await playQueueItem(currentQueueIndex);
-          } catch (retryError) {
-            console.error('❌ Retry also failed:', retryError);
-          }
+          await playQueueItem(currentQueueIndex);
         }
       }
-    } else {
-      console.log('⚠️ No audio element available, creating new one...');
-      // If no audio element, try to start queue again
-      try {
-        await playQueue();
-      } catch (error) {
-        console.error('❌ Error restarting queue:', error);
-      }
     }
-  }, [listeningQueue, isQueuePlaying, isPlaying, audioRef, setIsMaximized, playQueue, currentQueueIndex, setControlsPlaying, setIsPreloading, playQueueItem]);
+  }, [listeningQueue, isQueuePlaying, isPlaying, audioRef, setIsMaximized, playQueue, currentQueueIndex, playQueueItem]);
 
   const handleControlsPrevious = useCallback(async () => {
     console.log('⏮️ Previous button clicked:', {

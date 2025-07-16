@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useRef, useState, useCallback, useEffect } from 'react';
-import { generateSpeechWithTimings, cleanupAudioUrl, getTTSCacheStats } from '@/lib/tts';
+import { generateSpeech, cleanupAudioUrl, getTTSCacheStats } from '@/lib/tts';
 import { useLexioState } from '@/lib/store';
 import { useWordSync, WordData } from '@/hooks/useWordSync';
 
@@ -117,8 +117,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       setCurrentPlayingText(customText);
       
-      const result = await generateSpeechWithTimings(customText, {}, selectedVoiceId);
-      console.log('✅ generateSpeechWithTimings completed:', { 
+      const result = await generateSpeech(customText, {}, selectedVoiceId);
+      console.log('✅ generateSpeech completed:', { 
         audioUrl: !!result.audioUrl, 
         wordTimingsCount: result.wordTimings?.length 
       });
@@ -239,8 +239,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const handleClearCache = useCallback(() => {
     if (process.env.NODE_ENV === 'development') {
-      import('@/lib/tts').then(({ clearTTSCache }) => {
-        if (clearTTSCache()) setCacheStats(getTTSCacheStats());
+      import('@/lib/tts').then(async ({ clearTTSCache }) => {
+        const success = await clearTTSCache();
+        if (success) setCacheStats(getTTSCacheStats());
       });
     }
   }, []);
@@ -298,55 +299,62 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       formatTime,
     }}>
       {children}
-      {/* FIX: Only render the audio element when a valid URL exists */}
-      {audioUrl && (
-        <audio
-          ref={audioRef}
-          src={audioUrl}
-          preload="auto"
-          onPlay={() => {
-            console.log('Audio element: onPlay event fired');
-            setIsPlaying(true);
-          }}
-          onPause={() => {
-            console.log('Audio element: onPause event fired');
-            setIsPlaying(false);
-          }}
-          onLoadedData={() => {
-            console.log('Audio element: onLoadedData fired, duration:', audioRef.current?.duration);
-            if (audioRef.current) {
-              const audioDuration = audioRef.current.duration;
-              setDuration(audioDuration);
-              
-              // Generate word timings if we don't have real ones from ElevenLabs
-              if (currentPlayingText && words.length === 0 && audioDuration > 0) {
-                console.log('🎯 No real word timings available, generating intelligent fallback timings');
-                // This fallback logic is no longer needed as we rely on API word timings
-                // const generatedTimings = generateWordTimings(currentPlayingText, audioDuration);
-                // if (generatedTimings.length > 0) {
-                //   setWords(generatedTimings);
-                //   console.log('✅ Fallback word timings set:', generatedTimings.length, 'words');
-                // }
-              }
+      {/* Always render audio element to keep ref stable */}
+      <audio
+        ref={audioRef}
+        src={audioUrl ?? undefined} // Use undefined to remove the attribute when audioUrl is null
+        preload="auto"
+        onPlay={() => {
+          console.log('Audio element: onPlay event fired');
+          setIsPlaying(true);
+        }}
+        onPause={() => {
+          console.log('Audio element: onPause event fired');
+          setIsPlaying(false);
+        }}
+        onLoadedData={() => {
+          console.log('Audio element: onLoadedData fired, duration:', audioRef.current?.duration);
+          if (audioRef.current) {
+            const audioDuration = audioRef.current.duration;
+            setDuration(audioDuration);
+            
+            // Generate word timings if we don't have real ones from ElevenLabs
+            if (currentPlayingText && words.length === 0 && audioDuration > 0) {
+              console.log('🎯 No real word timings available, generating intelligent fallback timings');
+              // This fallback logic is no longer needed as we rely on API word timings
+              // const generatedTimings = generateWordTimings(currentPlayingText, audioDuration);
+              // if (generatedTimings.length > 0) {
+              //   setWords(generatedTimings);
+              //   console.log('✅ Fallback word timings set:', generatedTimings.length, 'words');
+              // }
             }
-          }}
-          onTimeUpdate={() => {
-            if (audioRef.current) {
-              setCurrentTime(audioRef.current.currentTime);
-            }
-          }}
-          onError={(e) => {
-            console.error('Audio element: onError fired', e);
-            setAudioError('Audio playback failed');
-            setIsPlaying(false);
-          }}
-          onEnded={() => {
-            console.log('Audio element: onEnded fired');
-            setIsPlaying(false);
-            setCurrentTime(0);
-          }}
-        />
-      )}
+          }
+        }}
+        onCanPlay={() => {
+          // Automatically play when new audio is ready
+          console.log('Audio element: onCanPlay fired - ready for automatic playback');
+          if (audioRef.current && audioUrl && !isPlaying) {
+            audioRef.current.play().catch(e => console.error("Auto-play failed", e));
+          }
+        }}
+        onTimeUpdate={() => {
+          if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime);
+          }
+        }}
+        onError={(e) => {
+          console.error('Audio element: onError fired', e);
+          setAudioError('Audio playback failed');
+          setIsPlaying(false);
+        }}
+        onEnded={() => {
+          // This will be used for auto-playing the next item in the queue
+          console.log('AudioContext: onEnded event fired');
+          setIsPlaying(false);
+          setCurrentTime(0);
+          // The QueueContext will listen for this and trigger the next item
+        }}
+      />
     </AudioContext.Provider>
   );
 };

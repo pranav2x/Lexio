@@ -2,6 +2,15 @@
  * Text-to-Speech integration using ElevenLabs API with real character-level alignment
  */
 
+// Import the new IndexedDB cache functions
+import { 
+  getAudioFromCache, 
+  setAudioInCache, 
+  generateCacheKey,
+  clearTTSCache as clearTTSCacheIndexedDB,
+  getTTSCacheStats as getTTSCacheStatsIndexedDB
+} from './ttsCache';
+
 export interface TTSOptions {
   voiceId?: string;
   stability?: number;
@@ -22,13 +31,6 @@ export interface TTSResult {
   duration?: number;
   fromCache?: boolean;
   wordTimings?: WordTiming[];
-}
-
-interface CachedAudio {
-  audioData: string;
-  timestamp: number;
-  textHash: string;
-  voiceSettings: string;
 }
 
 export interface VoiceOption {
@@ -176,12 +178,6 @@ const DEFAULT_TTS_OPTIONS: Required<TTSOptions> = {
   useSpeakerBoost: true,
 };
 
-const DEV_CACHE_KEY = 'narrate-dev-tts-cache';
-const DEV_CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
-const DEV_CACHE_MAX_SIZE = 15;
-
-const isDevelopment = process.env.NODE_ENV === 'development';
-
 class TTSRequestQueue {
   private queue: QueuedRequest[] = [];
   private isProcessing = false;
@@ -279,117 +275,19 @@ class TTSRequestQueue {
 
 const ttsQueue = new TTSRequestQueue();
 
-function simpleHash(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(36);
-}
+// Old localStorage caching functions removed - now using IndexedDB via ttsCache.ts
 
-function generateCacheKey(text: string, options: Required<TTSOptions>): string {
-  const textHash = simpleHash(text.trim().toLowerCase());
-  const settingsHash = simpleHash(JSON.stringify({
-    voiceId: options.voiceId,
-    stability: options.stability,
-    similarityBoost: options.similarityBoost,
-    style: options.style,
-    useSpeakerBoost: options.useSpeakerBoost,
-  }));
-  return `${textHash}-${settingsHash}`;
-}
-
-function getCachedAudio(cacheKey: string): CachedAudio | null {
-  if (!isDevelopment || typeof window === 'undefined') return null;
-  
-  try {
-    const cacheData = localStorage.getItem(DEV_CACHE_KEY);
-    if (!cacheData) return null;
-    
-    const cache = JSON.parse(cacheData);
-    const item = cache[cacheKey];
-    
-    if (!item) return null;
-    
-    if (Date.now() - item.timestamp > DEV_CACHE_MAX_AGE) {
-        delete cache[cacheKey];
-      localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
-      return null;
-    }
-    
-    return item;
-  } catch (error) {
-    console.debug('Error reading TTS cache:', error);
-    return null;
-  }
-}
-
-function setCachedAudio(cacheKey: string, audioBlob: Blob, textHash: string, voiceSettings: string): void {
-  if (!isDevelopment || typeof window === 'undefined') return;
-  
-  try {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      try {
-        const base64Data = reader.result as string;
-        const cacheData = localStorage.getItem(DEV_CACHE_KEY);
-        const cache = cacheData ? JSON.parse(cacheData) : {};
-        
-        const newItem = {
-          audioData: base64Data,
-          timestamp: Date.now(),
-          textHash,
-          voiceSettings,
-        };
-        
-        cache[cacheKey] = newItem;
-        
-        const keys = Object.keys(cache);
-        if (keys.length > DEV_CACHE_MAX_SIZE) {
-          const sortedKeys = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
-          const toRemove = sortedKeys.slice(0, keys.length - DEV_CACHE_MAX_SIZE);
-          toRemove.forEach(key => delete cache[key]);
-        }
-        
-        localStorage.setItem(DEV_CACHE_KEY, JSON.stringify(cache));
-        console.log(`TTS: Cached audio successfully`);
-        
-      } catch (error) {
-        console.error('Error caching TTS audio:', error);
-      }
-    };
-    reader.readAsDataURL(audioBlob);
-  } catch (error) {
-    console.debug('Error setting TTS cache:', error);
-  }
-}
-
-function dataURLToBlob(dataURL: string): Blob {
-  const byteString = atob(dataURL.split(',')[1]);
-  const mimeString = dataURL.split(',')[0].split(':')[1].split(';')[0];
-  const ab = new ArrayBuffer(byteString.length);
-  const ia = new Uint8Array(ab);
-  
-  for (let i = 0; i < byteString.length; i++) {
-    ia[i] = byteString.charCodeAt(i);
-  }
-  
-  return new Blob([ab], { type: mimeString });
-}
-
-export async function generateSpeechWithTimings(
+export async function generateSpeech(
   text: string,
   options: TTSOptions = {},
   selectedVoiceId?: string
 ): Promise<TTSResult> {
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
-    console.error('generateSpeechWithTimings called with invalid text:', { text, type: typeof text, length: text?.length });
+    console.error('generateSpeech called with invalid text:', { text, type: typeof text, length: text?.length });
     throw new Error('Valid text is required for speech generation');
   }
 
-  console.log('generateSpeechWithTimings called with:', {
+  console.log('generateSpeech called with:', {
     textLength: text.length,
     selectedVoiceId
   });
@@ -399,6 +297,26 @@ export async function generateSpeechWithTimings(
     ...options,
     ...(selectedVoiceId && { voiceId: selectedVoiceId }),
   };
+
+  // Generate cache key for this request
+  const cacheKey = generateCacheKey(text.trim(), config.voiceId);
+  
+  // Check cache first
+  try {
+    const cachedAudio = await getAudioFromCache(cacheKey);
+    if (cachedAudio) {
+      console.log(`🎉 TTS: Cache hit for request`);
+      const audioUrl = URL.createObjectURL(cachedAudio.audioBlob);
+      return {
+        audioUrl,
+        audioBlob: cachedAudio.audioBlob,
+        wordTimings: cachedAudio.wordTimings,
+        fromCache: true
+      };
+    }
+  } catch (error) {
+    console.warn('Cache lookup failed, proceeding with API call:', error);
+  }
 
   try {
     const requestId = `tts-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -435,11 +353,20 @@ export async function generateSpeechWithTimings(
     const audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
     const audioUrl = URL.createObjectURL(audioBlob);
 
+    // Cache the result after successful API call
+    try {
+      await setAudioInCache(cacheKey, audioBlob, data.wordTimings || []);
+      console.log(`💾 TTS: Audio cached successfully`);
+    } catch (error) {
+      console.warn('Failed to cache audio:', error);
+    }
+
     const result: TTSResult = {
       audioUrl,
       audioBlob,
       duration: data.duration,
-      wordTimings: data.wordTimings
+      wordTimings: data.wordTimings,
+      fromCache: false
     };
 
     console.log('Generated speech with word timings:', data.wordTimings?.length || 0, 'words');
@@ -447,8 +374,84 @@ export async function generateSpeechWithTimings(
     return result;
 
   } catch (error) {
-    console.error('generateSpeechWithTimings error:', error);
+    console.error('generateSpeech error:', error);
     throw error;
+  }
+}
+
+// Function for pre-warming the cache without creating object URLs
+export async function fetchAndCacheSpeech(
+  text: string,
+  options: TTSOptions = {},
+  selectedVoiceId?: string
+): Promise<void> {
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    console.warn('fetchAndCacheSpeech called with invalid text');
+    return;
+  }
+
+  const config = { 
+    ...DEFAULT_TTS_OPTIONS, 
+    ...options,
+    ...(selectedVoiceId && { voiceId: selectedVoiceId }),
+  };
+
+  // Generate cache key for this request
+  const cacheKey = generateCacheKey(text.trim(), config.voiceId);
+  
+  // Check if already cached
+  try {
+    const cachedAudio = await getAudioFromCache(cacheKey);
+    if (cachedAudio) {
+      console.log(`🔥 Pre-warm cache: Already cached`);
+      return; // Already cached, no need to fetch
+    }
+  } catch (error) {
+    console.warn('Cache lookup failed during pre-warm:', error);
+  }
+
+  // Not cached, fetch and cache it
+  try {
+    const requestId = `prewarm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    const data = await ttsQueue.add(requestId, async () => {
+      console.log(`🔥 Pre-warm: Making API call for request: ${requestId}`);
+      
+      const response = await fetch('/api/tts-with-timing', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text.trim(),
+          voice_id: config.voiceId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText };
+        }
+        throw new Error(errorData.error || `API error (${response.status}): ${errorText}`);
+      }
+
+      return await response.json();
+    });
+    
+    const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+    const audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
+
+    // Cache the result - this is the main purpose of this function
+    await setAudioInCache(cacheKey, audioBlob, data.wordTimings || []);
+    console.log(`🔥 Pre-warm: Audio cached successfully`);
+
+  } catch (error) {
+    console.warn('Pre-warm cache failed:', error);
+    // Don't throw - pre-warming failures shouldn't break the app
   }
 }
 
@@ -458,41 +461,13 @@ export function cleanupAudioUrl(audioUrl: string): void {
   }
 }
 
-export function clearTTSCache(): boolean {
-  if (!isDevelopment || typeof window === 'undefined') return false;
-  
-  try {
-    localStorage.removeItem(DEV_CACHE_KEY);
-    console.log('TTS: Development cache cleared');
-    return true;
-  } catch (error) {
-    console.debug('Error clearing TTS cache:', error);
-    return false;
-  }
+// Re-export the new IndexedDB cache functions
+export async function clearTTSCache(): Promise<boolean> {
+  return clearTTSCacheIndexedDB();
 }
 
-export function getTTSCacheStats(): { count: number; size: string; enabled: boolean } | null {
-  if (!isDevelopment || typeof window === 'undefined') {
-    return { count: 0, size: '0 KB', enabled: false };
-  }
-  
-  try {
-    const cacheData = localStorage.getItem(DEV_CACHE_KEY);
-    
-    if (!cacheData) {
-      return { count: 0, size: '0 KB', enabled: true };
-    }
-    
-    const cache = JSON.parse(cacheData);
-    const count = Object.keys(cache).length;
-    const sizeBytes = new Blob([cacheData]).size;
-    const sizeKB = (sizeBytes / 1024).toFixed(1);
-    
-    return { count, size: `${sizeKB} KB`, enabled: true };
-  } catch (error) {
-    console.debug('Error getting TTS cache stats:', error);
-    return { count: 0, size: '0 KB', enabled: true };
-  }
+export async function getTTSCacheStats(): Promise<{ count: number; size: string; enabled: boolean }> {
+  return getTTSCacheStatsIndexedDB();
 }
 
 export function splitTextForTTS(text: string, maxLength: number = 2500): string[] {
@@ -582,7 +557,7 @@ export function clearTTSQueue() {
   ttsQueue.clearQueue();
 }
 
-if (isDevelopment && typeof window !== 'undefined') {
+if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).getTTSQueueStatus = getTTSQueueStatus;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

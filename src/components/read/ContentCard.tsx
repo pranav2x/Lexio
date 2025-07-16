@@ -3,8 +3,6 @@
 import React from 'react';
 import { useAudio } from '@/contexts/AudioContext';
 
-type PlayingSection = 'summary' | `section-${number}` | null;
-
 interface ContentCardProps {
   id: string;
   title: string;
