@@ -280,12 +280,14 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
       
       utterance.onerror = (event) => {
-        console.error('❌ Speech error for', item.title, ':', event.error);
         speechBusyRef.current = false;
         
-        // Only set error for serious errors, not interruptions
+        // Only log and set error for serious errors, not normal interruptions
         if (event.error !== 'interrupted' && event.error !== 'canceled') {
+          console.error('❌ Speech error for', item.title, ':', event.error);
           setAudioError(`Speech error: ${event.error}`);
+        } else {
+          console.log('🔇 Speech interrupted/canceled for', item.title, '(normal pause behavior)');
         }
         setIsPlaying(false);
       };
@@ -344,7 +346,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
       
       utterance.onerror = (event) => {
-        setAudioError(`Speech error: ${event.error}`);
+        // Only set error for serious errors, not normal interruptions
+        if (event.error !== 'interrupted' && event.error !== 'canceled') {
+          setAudioError(`Speech error: ${event.error}`);
+        }
         setIsPlaying(false);
       };
       
@@ -364,21 +369,39 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsPaused(true);
         setIsPlaying(false);
         pausedTimeRef.current = Date.now();
+        console.log('⏸️ Paused at time:', currentTime, 'word index:', currentWordIndex);
       }
     } else if (isPaused) {
-      // Resume from current position
+      // Resume from current position with improved precision
       if (currentPlayingText && words.length > 0) {
         try {
           speechSynthesis.cancel();
           
-          // Find the current word position
           const currentTimeInSeconds = currentTime;
-          const startWordIndex = Math.max(0, currentWordIndex);
+          let startWordIndex = Math.max(0, currentWordIndex);
           
-          // Create text starting from current position
+          // If we're in the middle of a word, calculate how much of it we've already "spoken"
+          const currentWord = words[startWordIndex];
+          let wordProgressRatio = 0;
+          
+          if (currentWord) {
+            const wordProgress = currentTimeInSeconds - currentWord.start;
+            const wordDuration = currentWord.end - currentWord.start;
+            wordProgressRatio = Math.max(0, Math.min(1, wordProgress / wordDuration));
+            
+            // If we're more than halfway through the current word, start from the next word
+            if (wordProgressRatio > 0.5 && startWordIndex < words.length - 1) {
+              startWordIndex += 1;
+              console.log('📍 Resuming from next word due to progress ratio:', wordProgressRatio);
+            }
+          }
+          
+          // Create text starting from the calculated position
           const textWords = currentPlayingText.split(' ');
           const remainingWords = textWords.slice(startWordIndex);
           const remainingText = remainingWords.join(' ');
+          
+          console.log('▶️ Resuming from word index:', startWordIndex, 'time:', currentTimeInSeconds);
           
           if (remainingText.trim()) {
             const utterance = new SpeechSynthesisUtterance(remainingText);
@@ -399,12 +422,21 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             
             utterance.onstart = () => {
               const now = Date.now();
-              // Calculate the offset time so timing continues from where we paused
-              actualStartTimeRef.current = now - (currentTimeInSeconds * 1000);
+              
+              // Calculate the time offset to align with where we should be
+              const targetStartTime = words[startWordIndex]?.start || currentTimeInSeconds;
+              actualStartTimeRef.current = now - (targetStartTime * 1000);
               startTimeRef.current = actualStartTimeRef.current;
+              
+              // Update our tracking to the new starting word
+              setCurrentWordIndex(startWordIndex);
+              setCurrentTime(targetStartTime);
+              
               setIsPlaying(true);
               setIsPaused(false);
               pausedTimeRef.current = 0;
+              
+              console.log('✅ Resumed playback from time:', targetStartTime);
             };
             
             utterance.onend = () => {
@@ -451,9 +483,60 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setCurrentTime(newTime);
         actualStartTimeRef.current = Date.now() - (newTime * 1000);
         startTimeRef.current = actualStartTimeRef.current;
+        
+        console.log('🎯 Seeked to time:', newTime, 'word index:', newWordIndex);
+        
+        // If we're currently playing, restart speech from the new position
+        if (isPlaying && currentPlayingText) {
+          speechSynthesis.cancel();
+          
+          const textWords = currentPlayingText.split(' ');
+          const remainingWords = textWords.slice(newWordIndex);
+          const remainingText = remainingWords.join(' ');
+          
+          if (remainingText.trim()) {
+            const utterance = new SpeechSynthesisUtterance(remainingText);
+            utterance.rate = playbackRate;
+            utterance.pitch = 1;
+            utterance.volume = 1;
+            
+            const voices = speechSynthesis.getVoices();
+            const preferredVoice = voices.find(voice => 
+              voice.name.includes('Alex') || 
+              voice.name.includes('Daniel') || 
+              voice.name.includes('Samantha') ||
+              voice.lang.includes('en')
+            );
+            if (preferredVoice) {
+              utterance.voice = preferredVoice;
+            }
+            
+            utterance.onstart = () => {
+              const now = Date.now();
+              actualStartTimeRef.current = now - (newTime * 1000);
+              startTimeRef.current = actualStartTimeRef.current;
+            };
+            
+            utterance.onend = () => {
+              handleStop();
+              if (onQueueItemComplete) {
+                onQueueItemComplete();
+              }
+            };
+            
+            utterance.onerror = (event) => {
+              if (event.error !== 'interrupted' && event.error !== 'canceled') {
+                setAudioError(`Speech error: ${event.error}`);
+              }
+            };
+            
+            utteranceRef.current = utterance;
+            speechSynthesis.speak(utterance);
+          }
+        }
       }
     }
-  }, [words]);
+  }, [words, isPlaying, currentPlayingText, playbackRate, handleStop, onQueueItemComplete]);
 
   const handleWordClick = useCallback((wordIndex: number) => {
     if (words[wordIndex]) {

@@ -142,7 +142,10 @@ const WebSpeechReader: React.FC<WebSpeechReaderProps> = ({
       };
       
       utterance.onerror = (event) => {
-        setError(`Speech error: ${event.error}`);
+        // Only set error for serious errors, not normal interruptions
+        if (event.error !== 'interrupted' && event.error !== 'canceled') {
+          setError(`Speech error: ${event.error}`);
+        }
         setIsLoading(false);
         setIsPlaying(false);
       };
@@ -230,7 +233,10 @@ const WebSpeechReader: React.FC<WebSpeechReaderProps> = ({
           };
           
           utterance.onerror = (event) => {
-            setError(`Speech error: ${event.error}`);
+            // Only set error for serious errors, not normal interruptions
+            if (event.error !== 'interrupted' && event.error !== 'canceled') {
+              setError(`Speech error: ${event.error}`);
+            }
             setIsLoading(false);
             setIsPlaying(false);
           };

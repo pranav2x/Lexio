@@ -28,19 +28,10 @@ const AudioPlayer: React.FC = () => {
     currentQueueIndex,
     isQueuePlaying,
     controlsPlaying,
-    handleControlsPlayPause,
-    handleControlsPrevious,
-    handleControlsNext,
-    handleControlsShuffle,
-    handleControlsRepeat,
-    controlsShuffle,
-    controlsRepeat,
     setCurrentQueueIndex,
     setIsQueuePlaying,
     setControlsPlaying,
   } = useQueue();
-
-  const speedOptions = [0.75, 1, 1.25, 1.5, 2];
 
   // Set up auto-advance callback when component mounts
   useEffect(() => {
@@ -68,16 +59,6 @@ const AudioPlayer: React.FC = () => {
               playQueueItem(nextItem);
             }
           }, 100);
-        } else if (controlsRepeat && listeningQueue.length > 0) {
-          // Repeat queue from beginning
-          console.log('🔄 Repeating queue from beginning');
-          setCurrentQueueIndex(0);
-          setTimeout(() => {
-            const firstItem = listeningQueue[0];
-            if (firstItem) {
-              playQueueItem(firstItem);
-            }
-          }, 100);
         } else {
           // End of queue
           console.log('✅ Queue completed');
@@ -93,7 +74,7 @@ const AudioPlayer: React.FC = () => {
     return () => {
       setOnQueueItemComplete(undefined);
     };
-  }, [currentQueueIndex, listeningQueue, controlsRepeat, controlsPlaying, isQueuePlaying, setCurrentQueueIndex, setIsQueuePlaying, setControlsPlaying, playQueueItem, setOnQueueItemComplete]);
+  }, [currentQueueIndex, listeningQueue, controlsPlaying, isQueuePlaying, setCurrentQueueIndex, setIsQueuePlaying, setControlsPlaying, playQueueItem, setOnQueueItemComplete]);
 
   // Don't render if no audio and no queue
   if (!currentPlayingSection && listeningQueue.length === 0) {
@@ -147,41 +128,7 @@ const AudioPlayer: React.FC = () => {
     }
   };
 
-  // Enhanced previous function
-  const handleEnhancedPrevious = () => {
-    if (listeningQueue.length > 1 && currentQueueIndex > 0) {
-      const prevIndex = currentQueueIndex - 1;
-      setCurrentQueueIndex(prevIndex);
-      
-      // Stop current playback and play the previous item
-      handleStop();
-      setTimeout(() => {
-        const prevItem = listeningQueue[prevIndex];
-        if (prevItem) {
-          console.log('⏮️ Playing previous queue item:', prevItem.title);
-          playQueueItem(prevItem);
-        }
-      }, 100);
-    }
-  };
 
-  // Enhanced next function
-  const handleEnhancedNext = () => {
-    if (listeningQueue.length > 1 && currentQueueIndex < listeningQueue.length - 1) {
-      const nextIndex = currentQueueIndex + 1;
-      setCurrentQueueIndex(nextIndex);
-      
-      // Stop current playback and play the next item
-      handleStop();
-      setTimeout(() => {
-        const nextItem = listeningQueue[nextIndex];
-        if (nextItem) {
-          console.log('⏭️ Playing next queue item:', nextItem.title);
-          playQueueItem(nextItem);
-        }
-      }, 100);
-    }
-  };
 
   return (
     <>
@@ -225,23 +172,25 @@ const AudioPlayer: React.FC = () => {
                       </>
                     )}
                     <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
-                    <span>•</span>
-                    <span>{playbackRate}x speed</span>
                   </div>
                 </div>
               </div>
 
               {/* Center: Playback Controls */}
-              <div className="flex items-center gap-2 mx-6">
-                {/* Previous */}
+              <div className="flex items-center gap-3 mx-6">
+                {/* Restart Button */}
                 <button
-                  onClick={handleEnhancedPrevious}
-                  disabled={listeningQueue.length <= 1 || currentQueueIndex <= 0}
-                  className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-white/10 flex items-center justify-center transition-all duration-200 border border-white/20 hover:border-white/30"
-                  title="Previous"
+                  onClick={() => {
+                    handleStop();
+                    if (currentQueueItem) {
+                      setTimeout(() => playQueueItem(currentQueueItem), 100);
+                    }
+                  }}
+                  className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all duration-200 border border-white/20 hover:border-white/30"
+                  title="Restart current item"
                 >
-                  <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
                 </button>
 
@@ -264,81 +213,20 @@ const AudioPlayer: React.FC = () => {
                     </svg>
                   )}
                 </button>
-
-                {/* Next */}
-                <button
-                  onClick={handleEnhancedNext}
-                  disabled={listeningQueue.length <= 1 || currentQueueIndex >= listeningQueue.length - 1}
-                  className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-white/10 flex items-center justify-center transition-all duration-200 border border-white/20 hover:border-white/30"
-                  title="Next"
-                >
-                  <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
-                  </svg>
-                </button>
               </div>
 
-              {/* Right: Speed & Options */}
+              {/* Right: Maximize Button */}
               <div className="flex items-center gap-2 flex-shrink-0">
-               
-                {/* Speed Control */}
-                <div className="flex items-center gap-0.5">
-                  {speedOptions.map((speed) => (
-                    <button
-                      key={speed}
-                      onClick={() => handleSpeedChange(speed)}
-                      className={`px-2 py-1 rounded-md text-xs font-medium transition-all duration-200 ${
-                        playbackRate === speed
-                          ? 'bg-white text-black border border-white'
-                          : 'bg-white/10 text-white border border-white/20 hover:bg-white/20 hover:border-white/30'
-                      }`}
-                    >
-                      {speed}x
-                    </button>
-                  ))}
-                </div>
-
-                {/* Queue Controls */}
-                <div className="flex items-center gap-1 ml-3">
-                  <button
-                    onClick={handleControlsShuffle}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 border ${
-                      controlsShuffle 
-                        ? 'bg-white/20 text-white border-white/30' 
-                        : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white border-white/20 hover:border-white/30'
-                    }`}
-                    title="Shuffle"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                    </svg>
-                  </button>
-
-                  <button
-                    onClick={handleControlsRepeat}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 border ${
-                      controlsRepeat 
-                        ? 'bg-white/20 text-white border-white/30' 
-                        : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white border-white/20 hover:border-white/30'
-                    }`}
-                    title="Repeat"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  </button>
-
-                  {/* Maximize Button */}
-                  <button
-                    onClick={() => setIsMaximized(true)}
-                    className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all duration-200 border border-white/20 hover:border-white/30 ml-1"
-                    title="Open full screen player"
-                  >
-                    <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                    </svg>
-                  </button>
-                </div>
+                {/* Maximize Button */}
+                <button
+                  onClick={() => setIsMaximized(true)}
+                  className="w-10 h-10 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all duration-200 border border-white/20 hover:border-white/30"
+                  title="Open full screen player"
+                >
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                  </svg>
+                </button>
               </div>
             </div>
           </div>

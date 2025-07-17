@@ -55,7 +55,8 @@ const SortableQueueItem: React.FC<{
     <div
       ref={setNodeRef}
       style={style}
-      className={`group relative bg-black/40 border rounded-lg transition-all duration-300 hover:bg-black/30 hover:border-white/30 ${
+      onClick={onPlay}
+      className={`group relative bg-black/40 border rounded-lg transition-all duration-300 hover:bg-black/30 hover:border-white/30 cursor-pointer ${
         isCurrentlyPlaying 
           ? 'border-white/50 bg-black/20' 
           : 'border-white/20'
@@ -68,6 +69,7 @@ const SortableQueueItem: React.FC<{
           <button
             {...attributes}
             {...listeners}
+            onClick={(e) => e.stopPropagation()} // Prevent card click when dragging
             className="flex-shrink-0 mt-0.5 w-4 h-4 opacity-50 hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
             title="Drag to reorder"
           >
@@ -88,26 +90,13 @@ const SortableQueueItem: React.FC<{
             </h4>
           </div>
 
-          {/* Play/Remove buttons */}
-          <div className="flex-shrink-0 flex items-center gap-1">
+          {/* Remove button */}
+          <div className="flex-shrink-0">
             <button
-              onClick={onPlay}
-              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-              title="Play this item"
-            >
-              {isCurrentlyPlaying ? (
-                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-                </svg>
-              ) : (
-                <svg className="w-3 h-3 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z"/>
-                </svg>
-              )}
-            </button>
-
-            <button
-              onClick={onRemove}
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent card click when removing
+                onRemove();
+              }}
               className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors group"
               title="Remove from queue"
             >
