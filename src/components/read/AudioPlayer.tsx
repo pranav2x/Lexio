@@ -36,32 +36,39 @@ const AudioPlayer: React.FC = () => {
   // Set up auto-advance callback when component mounts
   useEffect(() => {
     const handleQueueItemComplete = () => {
-      console.log('🔄 Queue item completed, advancing...');
+      console.log('🔄 Queue item completed, checking for auto-advance...');
       
-      // ONLY auto-advance if the user is actively playing
+      // ONLY auto-advance if the user is actively playing and this completion is legitimate
       if (!controlsPlaying || !isQueuePlaying) {
         console.log('🔄 Not auto-advancing - user is not actively playing');
+        return;
+      }
+
+      // Add additional check to prevent multiple rapid completions
+      if (currentQueueIndex < 0) {
+        console.log('🔄 Not auto-advancing - invalid current index');
         return;
       }
       
       // Defer state updates to avoid updating during render
       setTimeout(() => {
-        // Auto-advance to next item in queue
+        // Auto-advance to next item in queue only if we're not at the end
         if (currentQueueIndex < listeningQueue.length - 1) {
-          console.log('🔄 Auto-advancing to next queue item');
+          console.log('🔄 Auto-advancing from index', currentQueueIndex, 'to', currentQueueIndex + 1);
           const nextIndex = currentQueueIndex + 1;
           setCurrentQueueIndex(nextIndex);
           
           // Start playing the next item automatically
           setTimeout(() => {
             const nextItem = listeningQueue[nextIndex];
-            if (nextItem) {
+            if (nextItem && controlsPlaying && isQueuePlaying) {
+              console.log('🔄 Playing next item:', nextItem.title);
               playQueueItem(nextItem);
             }
           }, 100);
         } else {
           // End of queue
-          console.log('✅ Queue completed');
+          console.log('✅ Queue completed - reached end');
           setIsQueuePlaying(false);
           setControlsPlaying(false);
         }
@@ -74,7 +81,7 @@ const AudioPlayer: React.FC = () => {
     return () => {
       setOnQueueItemComplete(undefined);
     };
-  }, [currentQueueIndex, listeningQueue, controlsPlaying, isQueuePlaying, setCurrentQueueIndex, setIsQueuePlaying, setControlsPlaying, playQueueItem, setOnQueueItemComplete]);
+  }, [currentQueueIndex, listeningQueue.length, controlsPlaying, isQueuePlaying, setCurrentQueueIndex, setIsQueuePlaying, setControlsPlaying, playQueueItem, setOnQueueItemComplete]);
 
   // Don't render if no audio and no queue
   if (!currentPlayingSection && listeningQueue.length === 0) {
@@ -89,36 +96,44 @@ const AudioPlayer: React.FC = () => {
       // Queue mode
       if (controlsPlaying || isPlaying) {
         // Pause current queue item
+        console.log('⏸️ Pausing queue playback');
         handlePlayPause();
         setControlsPlaying(false);
         setIsQueuePlaying(false);
       } else {
-        // Prepare queue for playback and load first item content
-        console.log('🎯 User opening queue - loading first item content');
+        // Start queue playback
+        console.log('🎯 User clicked play - starting queue playback');
         
-        // Always start from the beginning of the queue (index 0) like Spotify
-        if (currentQueueIndex < 0 && listeningQueue.length > 0) {
-          console.log('🎵 Setting queue to start from beginning (index 0)');
+        // Determine which item to play
+        let targetIndex = currentQueueIndex;
+        
+        // If no item is selected OR current index is invalid, start from the beginning
+        if (currentQueueIndex < 0 || currentQueueIndex >= listeningQueue.length) {
+          console.log('🎵 No valid item selected, starting from first item (index 0)');
+          targetIndex = 0;
           setCurrentQueueIndex(0);
         }
         
-        // Load the first queue item's content (but don't auto-play)
-        const firstItem = listeningQueue[currentQueueIndex >= 0 ? currentQueueIndex : 0];
-        if (firstItem) {
-          console.log('📄 Loading first queue item content:', firstItem.title);
-          // Load content without auto-playing - this just prepares the text and word timings
+        // Play the selected/target item
+        const targetItem = listeningQueue[targetIndex];
+        if (targetItem) {
+          console.log('📄 Starting queue with item:', targetItem.title, 'at index:', targetIndex);
+          
+          // Set playing states BEFORE playing to ensure consistency
+          setControlsPlaying(true);
+          setIsQueuePlaying(true);
+          
+          // Play the selected item
           setTimeout(() => {
-            generateAudioForSection(firstItem.id as any, firstItem.content);
+            playQueueItem(targetItem);
           }, 100);
         }
         
-        // Open maximized player for user to manually control playback
+        // Open maximized player when user starts playback
         setIsMaximized(true);
-        
-        console.log('📱 Maximized player opened with loaded content - ready for manual play');
       }
     } else {
-      // Direct playback mode
+      // Direct playback mode (no queue)
       handlePlayPause();
       
       // Open maximized player when user starts playback

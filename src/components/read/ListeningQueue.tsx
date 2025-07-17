@@ -28,9 +28,10 @@ const SortableQueueItem: React.FC<{
   content: string;
   index: number;
   isCurrentlyPlaying: boolean;
+  isLoading?: boolean;
   onPlay: () => void;
   onRemove: () => void;
-}> = ({ id, title, content, index, isCurrentlyPlaying, onPlay, onRemove }) => {
+}> = ({ id, title, content, index, isCurrentlyPlaying, isLoading = false, onPlay, onRemove }) => {
   const {
     attributes,
     listeners,
@@ -56,11 +57,15 @@ const SortableQueueItem: React.FC<{
       ref={setNodeRef}
       style={style}
       onClick={onPlay}
-      className={`group relative bg-black/40 border rounded-lg transition-all duration-300 hover:bg-black/30 hover:border-white/30 cursor-pointer ${
+      className={`group relative border rounded-lg transition-all duration-500 ease-out ${
+        isLoading ? 'cursor-wait' : 'cursor-pointer'
+      } ${
         isCurrentlyPlaying 
-          ? 'border-white/50 bg-black/20' 
-          : 'border-white/20'
-      } ${isDragging ? 'z-50' : ''}`}
+          ? 'border-white/70 bg-white/5 shadow-lg transform scale-[1.02]' 
+          : isLoading
+          ? 'border-white/40 bg-white/5 animate-pulse'
+          : 'border-white/20 bg-black/40 hover:bg-black/30 hover:border-white/30 hover:scale-[1.01]'
+      } ${isDragging ? 'z-50 shadow-2xl' : ''}`}
     >
       <div className="p-3">
         {/* Header with drag handle, title, and controls */}
@@ -70,7 +75,7 @@ const SortableQueueItem: React.FC<{
             {...attributes}
             {...listeners}
             onClick={(e) => e.stopPropagation()} // Prevent card click when dragging
-            className="flex-shrink-0 mt-0.5 w-4 h-4 opacity-50 hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
+            className="flex-shrink-0 mt-0.5 w-4 h-4 opacity-50 hover:opacity-100 active:opacity-70 transition-opacity cursor-grab active:cursor-grabbing"
             title="Drag to reorder"
           >
             <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -97,7 +102,7 @@ const SortableQueueItem: React.FC<{
                 e.stopPropagation(); // Prevent card click when removing
                 onRemove();
               }}
-              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors group"
+              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/15 flex items-center justify-center transition-colors group"
               title="Remove from queue"
             >
               <svg className="w-3 h-3 text-white group-hover:text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -122,7 +127,25 @@ const SortableQueueItem: React.FC<{
 
       {/* Playing indicator */}
       {isCurrentlyPlaying && (
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-white rounded-l-lg" />
+        <>
+          <div className="absolute left-0 top-0 bottom-0 w-1 bg-white rounded-l-lg animate-pulse" />
+          <div className="absolute top-2 right-2">
+            <div className="flex items-center gap-1 px-2 py-1 bg-white/10 rounded-full backdrop-blur-sm">
+              <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+              <span className="text-xs text-white font-medium">Playing</span>
+            </div>
+          </div>
+        </>
+      )}
+      
+      {/* Loading indicator */}
+      {isLoading && !isCurrentlyPlaying && (
+        <div className="absolute top-2 right-2">
+          <div className="flex items-center gap-1 px-2 py-1 bg-white/10 rounded-full backdrop-blur-sm">
+            <div className="w-2 h-2 bg-white rounded-full animate-spin border border-white/30"></div>
+            <span className="text-xs text-white/80 font-medium">Loading...</span>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -142,6 +165,7 @@ const ListeningQueue: React.FC = () => {
   
   const { currentPlayingSection, playQueueItem, handleStop } = useAudio();
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [loadingItemIndex, setLoadingItemIndex] = useState<number | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -165,21 +189,36 @@ const ListeningQueue: React.FC = () => {
 
   const handlePlayItem = async (index: number) => {
     const item = listeningQueue[index];
-    if (item) {
+    if (item && loadingItemIndex === null) {
       console.log('🎯 Queue: Playing item at index', index, ':', item.title);
+      
+      // Set loading state
+      setLoadingItemIndex(index);
       
       // Stop current playback first
       handleStop();
       
-      // Update queue state
-      setCurrentQueueIndex(index);
-      setControlsPlaying(true);
-      setIsQueuePlaying(true);
-      
-      // Small delay to ensure state updates are processed
+      // Add a small delay for smooth visual transition
       setTimeout(async () => {
-        await playQueueItem(item);
-      }, 100);
+        try {
+          // Update queue state for visual feedback
+          setCurrentQueueIndex(index);
+          setControlsPlaying(true);
+          setIsQueuePlaying(true);
+          
+          await playQueueItem(item);
+          console.log('✅ Successfully started playing:', item.title);
+        } catch (error) {
+          console.error('❌ Failed to play item:', error);
+          // Reset state on error
+          setCurrentQueueIndex(-1);
+          setControlsPlaying(false);
+          setIsQueuePlaying(false);
+        } finally {
+          // Clear loading state
+          setLoadingItemIndex(null);
+        }
+      }, 150);
     }
   };
 
@@ -214,10 +253,14 @@ const ListeningQueue: React.FC = () => {
             <h3 className="text-sm font-semibold text-white">
               Queue ({listeningQueue.length})
             </h3>
-            {currentQueueIndex >= 0 && (
-              <div className="flex items-center gap-1">
+            {currentQueueIndex >= 0 && listeningQueue[currentQueueIndex] && (
+              <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-full">
                 <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                <span className="text-xs text-white/70">Playing #{currentQueueIndex + 1}</span>
+                <span className="text-xs text-white/90 font-medium">
+                  Playing: {listeningQueue[currentQueueIndex].title.length > 20 
+                    ? listeningQueue[currentQueueIndex].title.substring(0, 20) + '...' 
+                    : listeningQueue[currentQueueIndex].title}
+                </span>
               </div>
             )}
           </div>
@@ -226,8 +269,8 @@ const ListeningQueue: React.FC = () => {
             onClick={handleClearQueue}
             className={`px-2 py-1 rounded text-xs transition-colors ${
               showClearConfirm 
-                ? 'bg-white/20 text-white border border-white/30' 
-                : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white'
+                ? 'bg-white/20 text-white border border-white/30 active:bg-white/15' 
+                : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white active:bg-white/15'
             }`}
             title={showClearConfirm ? "Click again to confirm" : "Clear all items"}
           >
@@ -252,6 +295,7 @@ const ListeningQueue: React.FC = () => {
                 content={item.content}
                 index={index}
                 isCurrentlyPlaying={currentQueueIndex === index}
+                isLoading={loadingItemIndex === index}
                 onPlay={() => handlePlayItem(index)}
                 onRemove={() => removeFromQueue(item.id)}
               />

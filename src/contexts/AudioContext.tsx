@@ -86,6 +86,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const actualStartTimeRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null); // Keep for compatibility
   const speechBusyRef = useRef(false); // Prevent multiple simultaneous speech calls
+  const justStartedRef = useRef(false); // Prevent premature completion callbacks
 
   // Generate word timings based on text analysis (similar to WebSpeechReader)
   const generateWordTimings = useCallback((text: string, speed: number): WordData[] => {
@@ -129,7 +130,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setCurrentWordIndex(currentWordIdx);
       }
       
-      if (adjustedTime >= duration) {
+      if (adjustedTime >= duration && !justStartedRef.current) {
         handleStop();
         // Call queue completion callback if it exists
         if (onQueueItemComplete) {
@@ -159,6 +160,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const handleStop = useCallback(() => {
     speechSynthesis.cancel();
     speechBusyRef.current = false; // Clear busy flag when stopping
+    justStartedRef.current = false; // Clear flag when stopping
     setIsPlaying(false);
     setIsPaused(false);
     setCurrentWordIndex(-1);
@@ -230,17 +232,26 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         attempts++;
       }
       
-      // Clear all current audio state
+      // Clear all current audio state and reset timing
       setIsPlaying(false);
       setIsPaused(false);
       setCurrentWordIndex(-1);
       setCurrentTime(0);
+      setTimeOffset(0);
+      startTimeRef.current = 0;
+      actualStartTimeRef.current = 0;
+      pausedTimeRef.current = 0;
+      justStartedRef.current = true; // Prevent premature completion
       
       // Clear any error states
       setAudioError(null);
       
-      // Generate audio and word timings first
-      await generateAudioForSection(item.id, item.content);
+      // Set the current playing text and section for queue items
+      const wordTimings = generateWordTimings(item.content, playbackRate);
+      setWords(wordTimings);
+      setDuration(wordTimings[wordTimings.length - 1]?.end || 0);
+      setCurrentPlayingText(item.content);
+      setCurrentPlayingSection(item.id); // Use item ID as the section identifier
       
       // Start Web Speech API with proper error handling
       const utterance = new SpeechSynthesisUtterance(item.content);
@@ -267,11 +278,17 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsPlaying(true);
         setIsPaused(false);
         console.log('🎵 Started playing:', item.title);
+        
+        // Clear the justStarted flag after a brief delay to allow proper initialization
+        setTimeout(() => {
+          justStartedRef.current = false;
+        }, 500);
       };
       
       utterance.onend = () => {
         console.log('✅ Finished playing:', item.title);
         speechBusyRef.current = false;
+        justStartedRef.current = false; // Clear flag when naturally ending
         handleStop();
         // Call queue completion callback if it exists
         if (onQueueItemComplete) {
@@ -281,6 +298,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       
       utterance.onerror = (event) => {
         speechBusyRef.current = false;
+        justStartedRef.current = false; // Clear flag on error
         
         // Only log and set error for serious errors, not normal interruptions
         if (event.error !== 'interrupted' && event.error !== 'canceled') {

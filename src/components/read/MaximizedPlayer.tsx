@@ -97,7 +97,7 @@ const MaximizedPlayer: React.FC = () => {
       // Play the previous item
       setTimeout(() => {
         const prevItem = listeningQueue[prevIndex];
-        if (prevItem) {
+        if (prevItem && controlsPlaying) {
           console.log('⏮️ MaxPlayer: Playing previous item:', prevItem.title);
           playQueueItem(prevItem);
         }
@@ -122,7 +122,7 @@ const MaximizedPlayer: React.FC = () => {
       // Play the next item
       setTimeout(() => {
         const nextItem = listeningQueue[nextIndex];
-        if (nextItem) {
+        if (nextItem && controlsPlaying) {
           console.log('⏭️ MaxPlayer: Playing next item:', nextItem.title);
           playQueueItem(nextItem);
         }
@@ -132,7 +132,7 @@ const MaximizedPlayer: React.FC = () => {
 
   // Handle clicking on a specific queue item
   const handleQueueItemClick = (index: number) => {
-    if (index >= 0 && index < listeningQueue.length) {
+    if (index >= 0 && index < listeningQueue.length && index !== currentQueueIndex) {
       console.log('🎯 MaxPlayer: Clicked on queue item at index', index);
       
       // Stop current playback first
@@ -146,7 +146,7 @@ const MaximizedPlayer: React.FC = () => {
       // Play the selected item
       setTimeout(() => {
         const item = listeningQueue[index];
-        if (item) {
+        if (item && controlsPlaying) {
           console.log('🎯 MaxPlayer: Playing selected item:', item.title);
           playQueueItem(item);
         }
@@ -160,6 +160,7 @@ const MaximizedPlayer: React.FC = () => {
       // Queue mode
       if (isPlaying) {
         // Pause current queue item
+        console.log('⏸️ MaxPlayer: Pausing queue item');
         handlePlayPause();
         setControlsPlaying(false);
         setIsQueuePlaying(false);
@@ -167,7 +168,7 @@ const MaximizedPlayer: React.FC = () => {
         // Start playing current queue item
         const currentItem = listeningQueue[currentQueueIndex];
         if (currentItem) {
-          console.log('🎵 Maximized player starting queue item:', currentItem.title);
+          console.log('🎵 MaxPlayer: Starting queue item:', currentItem.title);
           setControlsPlaying(true);
           setIsQueuePlaying(true);
           playQueueItem(currentItem);
