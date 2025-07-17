@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { useAudio } from '@/contexts/AudioContext';
+import { ArrowLeft, RotateCcw } from 'lucide-react';
 
 interface HeaderProps {
   currentUrl: string | null;
@@ -10,56 +10,50 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ currentUrl, onBack, onStartOver }) => {
-  const { cacheStats, handleClearCache } = useAudio();
-
   return (
-    <header className="sticky top-0 z-50 glass-card border-b border-white/10">
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-2 text-white/70 hover:text-white transition-all duration-300 hover:scale-105 group"
-          >
-            <svg className="w-5 h-5 group-hover:transform group-hover:-translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-            </svg>
-            <span className="font-mono-enhanced text-sm font-medium">Back</span>
-          </button>
-          
-          <div className="flex items-center gap-4">
-            {/* Development Cache Stats */}
-            {process.env.NODE_ENV === 'development' && cacheStats?.enabled && (
-              <div className="flex items-center gap-3 text-xs">
-                <div className="glass-card px-3 py-1 rounded-lg">
-                  <span className="text-white/70 font-mono-enhanced">
-                    TTS Cache: {cacheStats.count} items ({cacheStats.size})
-                  </span>
-                </div>
-                {cacheStats.count > 0 && (
-                  <button
-                    onClick={handleClearCache}
-                    className="text-white/50 hover:text-red-400 transition-colors duration-300 font-mono-enhanced"
-                    title="Clear TTS cache"
-                  >
-                    🗑️
-                  </button>
-                )}
-              </div>
-            )}
+    <div className="flex-shrink-0 px-3 lg:px-4 py-3 border-b border-white/10 bg-black/20 backdrop-blur-sm">
+      <div className="max-w-none">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          {/* Navigation and Actions */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onBack}
+              className="flex items-center gap-2 px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+              title="Back to home"
+            >
+              <ArrowLeft size={16} />
+              <span className="text-sm">Back</span>
+            </button>
             
-            <div className="text-sm text-white/50 hidden sm:block font-mono-enhanced">
-              {currentUrl && new URL(currentUrl).hostname}
-            </div>
             <button
               onClick={onStartOver}
-              className="btn-premium px-6 py-2 rounded-lg font-mono-enhanced text-sm"
+              className="flex items-center gap-2 px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+              title="Start over"
             >
-              New Site
+              <RotateCcw size={16} />
+              <span className="text-sm">Start Over</span>
             </button>
           </div>
+
+          {/* URL Display */}
+          {currentUrl && (
+            <div className="flex items-center gap-2 text-xs text-white/60 group hover:text-white/80 transition-colors min-w-0">
+              <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              <a 
+                href={currentUrl} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="font-mono hover:text-white transition-all duration-300 truncate"
+              >
+                {currentUrl}
+              </a>
+            </div>
+          )}
         </div>
       </div>
-    </header>
+    </div>
   );
 };
 

@@ -1,218 +1,287 @@
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useQueue } from '@/contexts/QueueContext';
 import { useAudio } from '@/contexts/AudioContext';
-import WordHighlighter from './WordHighlighter';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
-// Helper function to truncate text at word boundaries
-const truncateAtWordBoundary = (text: string, maxLength: number): string => {
-  if (text.length <= maxLength) return text;
-  
-  // Find the last space within the limit
-  let truncated = text.substring(0, maxLength);
-  const lastSpaceIndex = truncated.lastIndexOf(' ');
-  
-  // If we found a space, truncate there
-  if (lastSpaceIndex > 0) {
-    truncated = truncated.substring(0, lastSpaceIndex);
-  }
-  
-  return truncated + '...';
+// Sortable queue item component
+const SortableQueueItem: React.FC<{
+  id: string;
+  title: string;
+  content: string;
+  index: number;
+  isCurrentlyPlaying: boolean;
+  onPlay: () => void;
+  onRemove: () => void;
+}> = ({ id, title, content, index, isCurrentlyPlaying, onPlay, onRemove }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  const truncateText = (text: string, maxLength: number) => {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength).trim() + '...';
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`group relative bg-black/40 border rounded-lg transition-all duration-300 hover:bg-black/30 hover:border-white/30 ${
+        isCurrentlyPlaying 
+          ? 'border-white/50 bg-black/20' 
+          : 'border-white/20'
+      } ${isDragging ? 'z-50' : ''}`}
+    >
+      <div className="p-3">
+        {/* Header with drag handle, title, and controls */}
+        <div className="flex items-start gap-2 mb-2">
+          {/* Drag Handle */}
+          <button
+            {...attributes}
+            {...listeners}
+            className="flex-shrink-0 mt-0.5 w-4 h-4 opacity-50 hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
+            title="Drag to reorder"
+          >
+            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8h16M4 16h16" />
+            </svg>
+          </button>
+
+          {/* Queue Position */}
+          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
+            <span className="text-xs text-white font-medium">{index + 1}</span>
+          </div>
+
+          {/* Title */}
+          <div className="flex-1 min-w-0">
+            <h4 className="text-sm font-medium text-white line-clamp-2 leading-tight">
+              {title}
+            </h4>
+          </div>
+
+          {/* Play/Remove buttons */}
+          <div className="flex-shrink-0 flex items-center gap-1">
+            <button
+              onClick={onPlay}
+              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+              title="Play this item"
+            >
+              {isCurrentlyPlaying ? (
+                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                </svg>
+              ) : (
+                <svg className="w-3 h-3 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              )}
+            </button>
+
+            <button
+              onClick={onRemove}
+              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors group"
+              title="Remove from queue"
+            >
+              <svg className="w-3 h-3 text-white group-hover:text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Content Preview */}
+        <div className="text-xs text-white/60 line-clamp-2 leading-relaxed ml-8">
+          {truncateText(content, 100)}
+        </div>
+
+        {/* Stats */}
+        <div className="flex items-center gap-2 text-xs text-white/40 mt-2 ml-8">
+          <span>{content.split(' ').length} words</span>
+          <span>•</span>
+          <span>~{Math.ceil(content.split(' ').length / 200)}m</span>
+        </div>
+      </div>
+
+      {/* Playing indicator */}
+      {isCurrentlyPlaying && (
+        <div className="absolute left-0 top-0 bottom-0 w-1 bg-white rounded-l-lg" />
+      )}
+    </div>
+  );
 };
 
 const ListeningQueue: React.FC = () => {
-  const {
-    listeningQueue,
-    currentQueueIndex,
-    isQueuePlaying,
-    removeFromQueue,
-    clearQueue,
+  const { 
+    listeningQueue, 
+    currentQueueIndex, 
+    removeFromQueue, 
+    clearQueue, 
+    reorderQueue,
+    setCurrentQueueIndex,
+    setControlsPlaying,
+    setIsQueuePlaying
   } = useQueue();
+  
+  const { currentPlayingSection, playQueueItem, handleStop } = useAudio();
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-  const {
-    words,
-    currentWordIndex,
-    currentTime,
-    duration,
-    formatTime,
-    handleWordClick,
-  } = useAudio();
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (active.id !== over?.id) {
+      const oldIndex = listeningQueue.findIndex(item => item.id === active.id);
+      const newIndex = listeningQueue.findIndex(item => item.id === over?.id);
+      
+      if (oldIndex !== -1 && newIndex !== -1) {
+        reorderQueue(oldIndex, newIndex);
+      }
+    }
+  };
+
+  const handlePlayItem = async (index: number) => {
+    const item = listeningQueue[index];
+    if (item) {
+      console.log('🎯 Queue: Playing item at index', index, ':', item.title);
+      
+      // Stop current playback first
+      handleStop();
+      
+      // Update queue state
+      setCurrentQueueIndex(index);
+      setControlsPlaying(true);
+      setIsQueuePlaying(true);
+      
+      // Small delay to ensure state updates are processed
+      setTimeout(async () => {
+        await playQueueItem(item);
+      }, 100);
+    }
+  };
+
+  const handleClearQueue = () => {
+    if (showClearConfirm) {
+      clearQueue();
+      setShowClearConfirm(false);
+    } else {
+      setShowClearConfirm(true);
+      setTimeout(() => setShowClearConfirm(false), 3000);
+    }
+  };
+
+  if (listeningQueue.length === 0) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-center p-4">
+        <div className="text-4xl mb-3 opacity-50">🎵</div>
+        <h3 className="text-sm font-semibold text-white mb-2">Queue Empty</h3>
+        <p className="text-xs text-white/60 max-w-48 leading-relaxed">
+          Add content from the cards to start building your listening queue.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="w-full h-full queue-zone-enhanced rounded-xl p-4 gpu-accelerated flex flex-col overflow-hidden shadow-lg">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-5 h-5 glass-card rounded-full flex items-center justify-center">
-            <svg className="w-3 h-3 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-            </svg>
-          </div>
-          <h3 className="text-lg text-gradient font-mono-enhanced">Listening Queue</h3>
-        </div>
-        {listeningQueue.length > 0 && (
-          <button
-            onClick={clearQueue}
-            className="text-xs text-white/50 hover:text-white/80 transition-all duration-300 btn-premium px-3 py-1 rounded font-mono-enhanced"
-          >
-            Clear All
-          </button>
-        )}
-      </div>
-
-      {listeningQueue.length === 0 ? (
-        <div className="flex flex-col items-center justify-center flex-1 text-sm transition-all duration-500 text-white/60">
-          {/* Enhanced empty state with better visuals */}
-          <div className="relative mb-6">
-            <div className="w-24 h-24 glass-card rounded-full flex items-center justify-center mb-4 neon-glow bg-gradient-to-br from-white/10 to-white/5">
-              <svg className="w-12 h-12 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-              </svg>
-            </div>
-            
-            {/* Floating animation elements - now all white */}
-            <div className="absolute -top-2 -right-2 w-4 h-4 bg-white/20 rounded-full animate-pulse"></div>
-            <div className="absolute -bottom-2 -left-2 w-3 h-3 bg-white/15 rounded-full animate-pulse" style={{animationDelay: '0.5s'}}></div>
-            <div className="absolute top-8 -left-4 w-2 h-2 bg-white/10 rounded-full animate-pulse" style={{animationDelay: '1s'}}></div>
+    <div className="h-full flex flex-col">
+      {/* Queue Header */}
+      <div className="flex-shrink-0 mb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-white">
+              Queue ({listeningQueue.length})
+            </h3>
+            {currentQueueIndex >= 0 && (
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                <span className="text-xs text-white/70">Playing #{currentQueueIndex + 1}</span>
+              </div>
+            )}
           </div>
           
-          <div className="text-center space-y-4 max-w-xs">
-            <div className="text-lg font-bold text-gradient font-mono-enhanced">Your Queue is Empty</div>
-            <div className="text-sm text-white/70 font-mono-enhanced leading-relaxed">
-              Use the <span className="text-white/90 font-semibold">Smart Learning Assistant</span> to add content to your listening queue
-            </div>
-            
-            {/* Action suggestions */}
-            <div className="mt-6 space-y-2">
-              <div className="text-xs text-white/50 font-mono-enhanced font-medium">Try saying:</div>
-              <div className="space-y-1">
-                <div className="glass-card px-3 py-2 rounded-lg text-xs text-white/70 font-mono-enhanced">
-                  &quot;I want to learn about trade networks&quot;
-                </div>
-                <div className="glass-card px-3 py-2 rounded-lg text-xs text-white/70 font-mono-enhanced">
-                  &quot;Add the Mongol Empire section&quot;
-                </div>
-                <div className="glass-card px-3 py-2 rounded-lg text-xs text-white/70 font-mono-enhanced">
-                  &quot;Give me a summary of everything&quot;
-                </div>
-              </div>
-            </div>
-          </div>
+          <button
+            onClick={handleClearQueue}
+            className={`px-2 py-1 rounded text-xs transition-colors ${
+              showClearConfirm 
+                ? 'bg-white/20 text-white border border-white/30' 
+                : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white'
+            }`}
+            title={showClearConfirm ? "Click again to confirm" : "Clear all items"}
+          >
+            {showClearConfirm ? 'Confirm Clear' : 'Clear All'}
+          </button>
         </div>
-      ) : (
-        <>
-          {/* Currently Playing Item - Compact */}
-          {currentQueueIndex !== -1 && isQueuePlaying && listeningQueue[currentQueueIndex] && (
-            <div className="mb-4 glass-card rounded-xl p-3 shadow-lg shadow-white/20 border-2 border-white/30">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-2.5 h-2.5 bg-white/90 rounded-full animate-pulse shadow-lg"></div>
-                <span className="text-xs font-semibold font-mono-enhanced text-gradient">Now Playing</span>
-              </div>
-              <h3 className="text-sm font-bold text-white mb-3 font-mono-enhanced truncate">
-                {listeningQueue[currentQueueIndex].title}
-              </h3>
-              
-              {/* Word-by-word highlighting display */}
-              <div className="glass-card p-3 rounded-lg mb-4 max-h-32 overflow-y-auto custom-scrollbar">
-                <WordHighlighter
-                  words={words}
-                  currentWordIndex={currentWordIndex}
-                  onWordClick={handleWordClick}
-                  compact={true}
-                />
-              </div>
-              
-              {/* Progress for current item */}
-              <div className="mb-4">
-                <div className="flex items-center justify-between text-white/70 text-xs mb-2 font-mono-enhanced">
-                  <span>{formatTime(currentTime)}</span>
-                  <span>{formatTime(duration)}</span>
-                </div>
-                <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-white/90 to-white/60 rounded-full transition-all duration-300"
-                    style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
+      </div>
 
-          {/* Queue List */}
-          <div className="flex-1 space-y-2 mb-6 overflow-y-auto overflow-x-hidden px-1 py-1 custom-scrollbar">
-            <h4 className="text-sm font-semibold text-white/70 mb-3 font-mono-enhanced">Queue ({listeningQueue.length} items)</h4>
+      {/* Queue Items - Scrollable */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 min-h-0">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={listeningQueue.map(item => item.id)} strategy={verticalListSortingStrategy}>
             {listeningQueue.map((item, index) => (
-              <div
+              <SortableQueueItem
                 key={item.id}
-                className={`glass-card p-3 rounded-xl text-sm transition-all duration-300 flex items-start justify-between shadow-md hover:shadow-lg ${
-                  currentQueueIndex === index && isQueuePlaying
-                    ? 'bg-white/10 text-white border border-white/40 shadow-lg shadow-white/10'
-                    : 'text-white/80 hover:bg-white/5 hover:border-white/20'
-                }`}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs text-white/50 font-mono-enhanced">#{index + 1}</span>
-                    {currentQueueIndex === index && isQueuePlaying && (
-                      <div className="flex items-center gap-1">
-                        <div className="w-1.5 h-1.5 bg-white/90 rounded-full animate-pulse"></div>
-                        <span className="text-xs text-white/90 font-medium font-mono-enhanced">Playing</span>
-                      </div>
-                    )}
-                    {item.isLoading && (
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 animate-spin rounded-full border border-white/60 border-t-white"></div>
-                        <span className="text-xs text-white/70 font-medium font-mono-enhanced">Loading...</span>
-                      </div>
-                    )}
-                    {item.error && (
-                      <div className="flex items-center gap-1">
-                        <svg className="w-3 h-3 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 18.5c-.77.833.192 2.5 1.732 2.5z" />
-                        </svg>
-                        <span className="text-xs text-red-400 font-medium font-mono-enhanced">Failed</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="font-semibold text-xs truncate mb-1 font-mono-enhanced">{item.title}</div>
-                  <div className="text-xs text-white/60 leading-relaxed font-mono-enhanced">
-                    {truncateAtWordBoundary(item.content, 70)}
-                  </div>
-                  {item.error && (
-                    <div className="mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-xs text-red-300">
-                      {item.error}
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={() => removeFromQueue(item.id)}
-                  className="ml-4 btn-premium p-2 rounded-lg transition-all duration-300 flex-shrink-0 hover:bg-white/10 hover:border-white/30 text-white/60 hover:text-white/90"
-                  disabled={currentQueueIndex === index && isQueuePlaying}
-                  title="Remove from queue (returns to main content)"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </div>
+                id={item.id}
+                title={item.title}
+                content={item.content}
+                index={index}
+                isCurrentlyPlaying={currentQueueIndex === index}
+                onPlay={() => handlePlayItem(index)}
+                onRemove={() => removeFromQueue(item.id)}
+              />
             ))}
-          </div>
+          </SortableContext>
+        </DndContext>
+      </div>
 
-          {/* Queue Status - Simple and Clean */}
-          <div className="mt-4 pt-4 border-t border-white/10">
-            <div className="text-center text-sm text-white/60 font-mono-enhanced">
-              {isQueuePlaying ? (
-                <div className="flex items-center justify-center gap-2 text-white/80">
-                  <div className="w-2 h-2 bg-white/90 rounded-full animate-pulse"></div>
-                  <span>Playing: {currentQueueIndex + 1} of {listeningQueue.length}</span>
-                </div>
-              ) : (
-                <span>{listeningQueue.length} items ready to play</span>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+      {/* Queue Stats */}
+      <div className="flex-shrink-0 mt-3 pt-3 border-t border-white/10">
+        <div className="flex items-center justify-between text-xs text-white/50">
+          <span>
+            {listeningQueue.reduce((total, item) => total + item.content.split(' ').length, 0).toLocaleString()} words total
+          </span>
+          <span>
+            ~{Math.ceil(listeningQueue.reduce((total, item) => total + item.content.split(' ').length, 0) / 200)}m est.
+          </span>
+        </div>
+      </div>
     </div>
   );
 };

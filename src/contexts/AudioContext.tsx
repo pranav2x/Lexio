@@ -1,9 +1,13 @@
 "use client";
 
 import React, { createContext, useContext, useRef, useState, useCallback, useEffect } from 'react';
-import { generateSpeech, cleanupAudioUrl, getTTSCacheStats } from '@/lib/tts';
 import { useLexioState } from '@/lib/store';
-import { useWordSync, WordData } from '@/hooks/useWordSync';
+
+export interface WordData {
+  text: string;
+  start: number;
+  end: number;
+}
 
 type PlayingSection = 'summary' | `section-${number}` | null;
 
@@ -24,10 +28,9 @@ interface AudioContextType {
   isMaximized: boolean;
   isTransitioning: boolean;
   isPreloading: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  cacheStats: any;
   generateAudioForSection: (sectionType: PlayingSection, customText?: string) => Promise<void>;
   playSectionDirectly: (sectionId: string, content: string) => Promise<void>;
+  playQueueItem: (item: any) => Promise<void>;
   handlePlayPause: () => void;
   handleStop: () => void;
   handleSeek: (newTime: number) => void;
@@ -40,11 +43,13 @@ interface AudioContextType {
   setWords: (words: WordData[]) => void;
   setAudioUrl: (url: string | null) => void;
   clearAudio: () => void;
-  handleClearCache: () => void;
   formatTime: (seconds: number) => string;
+  onQueueItemComplete?: () => void;
+  setOnQueueItemComplete: (callback: (() => void) | undefined) => void;
 }
 
 const AudioContext = createContext<AudioContextType | undefined>(undefined);
+
 export const useAudio = () => {
   const context = useContext(AudioContext);
   if (context === undefined) throw new Error('useAudio must be used within an AudioProvider');
@@ -52,326 +57,489 @@ export const useAudio = () => {
 };
 
 export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { selectedVoiceId } = useLexioState();
+  const { scrapedData } = useLexioState();
 
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  // Web Speech API states
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [currentWordIndex, setCurrentWordIndex] = useState(-1);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
-  const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [hasSelectedSpeed, setHasSelectedSpeed] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [words, setWords] = useState<WordData[]>([]);
   const [currentPlayingSection, setCurrentPlayingSection] = useState<PlayingSection>(null);
   const [currentPlayingText, setCurrentPlayingText] = useState('');
-  const [words, setWords] = useState<WordData[]>([]);
   const [isMaximized, setIsMaximized] = useState(false);
-  const [isTransitioning] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [isPreloading, setIsPreloading] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [cacheStats, setCacheStats] = useState<any>(null);
+  const [timeOffset, setTimeOffset] = useState(0);
+  const [onQueueItemComplete, setOnQueueItemComplete] = useState<(() => void) | undefined>(undefined);
 
-  const audioRef = useRef<HTMLAudioElement>(null);
+  // Web Speech API refs
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const startTimeRef = useRef(0);
+  const pausedTimeRef = useRef(0);
+  const timeUpdateInterval = useRef<NodeJS.Timeout | null>(null);
+  const actualStartTimeRef = useRef(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null); // Keep for compatibility
+  const speechBusyRef = useRef(false); // Prevent multiple simultaneous speech calls
 
-  // Use the simplified word sync hook
-  const { currentWordIndex } = useWordSync({
-    audioRef,
-    words
-  });
+  // Generate word timings based on text analysis (similar to WebSpeechReader)
+  const generateWordTimings = useCallback((text: string, speed: number): WordData[] => {
+    const textWords = text.split(' ');
+    const baseWPM = 160;
+    const adjustedWPM = baseWPM * speed;
+    const charsPerSecond = (adjustedWPM * 5) / 60;
+    
+    let currentTime = 0;
+    const timings = textWords.map((word) => {
+      const wordComplexity = word.length > 6 ? 1.2 : word.length < 3 ? 0.8 : 1;
+      const baseDuration = (word.length + 1) / charsPerSecond;
+      const wordDuration = baseDuration * wordComplexity;
+      
+      const timing = {
+        text: word,
+        start: currentTime,
+        end: currentTime + wordDuration
+      };
+      currentTime += wordDuration;
+      return timing;
+    });
+    
+    return timings;
+  }, []);
 
-  // Debug: Track when currentPlayingText changes
+  // Update current word based on elapsed time
+  const updateCurrentWord = useCallback(() => {
+    if (words.length > 0 && isPlaying && !isPaused) {
+      const now = Date.now();
+      const elapsedTime = (now - actualStartTimeRef.current) / 1000;
+      const adjustedTime = elapsedTime + timeOffset;
+      
+      setCurrentTime(adjustedTime);
+      
+      const currentWordIdx = words.findIndex(timing => 
+        adjustedTime >= (timing.start - 0.1) && adjustedTime < (timing.end + 0.1)
+      );
+      
+      if (currentWordIdx !== -1 && currentWordIdx !== currentWordIndex) {
+        setCurrentWordIndex(currentWordIdx);
+      }
+      
+      if (adjustedTime >= duration) {
+        handleStop();
+        // Call queue completion callback if it exists
+        if (onQueueItemComplete) {
+          onQueueItemComplete();
+        }
+      }
+    }
+  }, [words, isPlaying, isPaused, currentWordIndex, duration, timeOffset, onQueueItemComplete]);
+
+  // Set up interval for updating current word
   useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔄 AudioContext: currentPlayingText changed, length:', currentPlayingText.length);
+    if (isPlaying && !isPaused) {
+      timeUpdateInterval.current = setInterval(updateCurrentWord, 100);
+    } else {
+      if (timeUpdateInterval.current) {
+        clearInterval(timeUpdateInterval.current);
+      }
     }
-  }, [currentPlayingText]);
 
-  // Debug: Create a wrapped setCurrentPlayingText to track calls
-  const wrappedSetCurrentPlayingText = useCallback((text: string) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🎯 setCurrentPlayingText called, length:', text.length);
-    }
-    setCurrentPlayingText(text);
+    return () => {
+      if (timeUpdateInterval.current) {
+        clearInterval(timeUpdateInterval.current);
+      }
+    };
+  }, [isPlaying, isPaused, updateCurrentWord]);
+
+  const handleStop = useCallback(() => {
+    speechSynthesis.cancel();
+    speechBusyRef.current = false; // Clear busy flag when stopping
+    setIsPlaying(false);
+    setIsPaused(false);
+    setCurrentWordIndex(-1);
+    setCurrentTime(0);
+    startTimeRef.current = 0;
+    actualStartTimeRef.current = 0;
+    pausedTimeRef.current = 0;
+    setTimeOffset(0);
   }, []);
 
   const generateAudioForSection = useCallback(async (sectionType: PlayingSection, customText?: string) => {
-    console.log('🎯 generateAudioForSection called:', { sectionType, customTextLength: customText?.length });
-    
-    if (!sectionType) {
-      console.error('❌ No sectionType provided');
-      return;
-    }
-    
-    if (!customText) {
-      console.warn('generateAudioForSection called without customText - this should use the queue system');
-      return;
-    }
-    
+    if (!scrapedData && !customText) return;
+
     setIsGeneratingAudio(true);
     setAudioError(null);
-    setCurrentPlayingSection(sectionType);
-    
-    // Clear words immediately to prevent stale highlighting
-    console.log('🧹 Clearing existing words before generating new audio');
-    setWords([]);
     
     try {
-      setCurrentPlayingText(customText);
+      let textToSpeak = customText || '';
       
-      console.log('🚀 Calling generateSpeech with selectedVoiceId:', selectedVoiceId);
-      const result = await generateSpeech(customText, {}, selectedVoiceId);
-      console.log('✅ generateSpeech completed:', { 
-        audioUrl: !!result.audioUrl, 
-        wordTimingsCount: result.wordTimings?.length,
-        firstWordTiming: result.wordTimings?.[0],
-        lastWordTiming: result.wordTimings?.[result.wordTimings?.length - 1]
-      });
-      
-      setAudioUrl(result.audioUrl);
-      
-      // Use real word timings from ElevenLabs
-      if (result.wordTimings && result.wordTimings.length > 0) {
-        console.log('🎯 Setting word timings from ElevenLabs:', {
-          count: result.wordTimings.length,
-          firstWord: result.wordTimings[0],
-          lastWord: result.wordTimings[result.wordTimings.length - 1],
-          sampleTimings: result.wordTimings.slice(0, 5).map(w => `"${w.text}" (${w.start.toFixed(2)}s-${w.end.toFixed(2)}s)`)
-        });
-        const wordData: WordData[] = result.wordTimings.map((timing) => ({
-          text: timing.text,
-          start: timing.start,
-          end: timing.end
-        }));
-        setWords(wordData);
-        console.log('✅ Word timings have been set in AudioContext state');
-      } else {
-        console.warn('⚠️ No word timings received from ElevenLabs API - highlighting will not work');
-        console.log('🔍 API response details:', {
-          hasResult: !!result,
-          hasWordTimings: !!result.wordTimings,
-          wordTimingsType: typeof result.wordTimings,
-          wordTimingsLength: result.wordTimings?.length,
-          fullResult: result
-        });
-        setWords([]);
+      if (!customText) {
+        if (sectionType === 'summary') {
+          // Extract summary logic would go here
+          textToSpeak = scrapedData?.cleanText?.substring(0, 1000) || scrapedData?.text?.substring(0, 1000) || '';
+        } else if (sectionType?.startsWith('section-')) {
+          const sectionIndex = parseInt(sectionType.split('-')[1]);
+          textToSpeak = scrapedData?.sections[sectionIndex]?.content || '';
+        }
       }
-      
-      if (process.env.NODE_ENV === 'development') setCacheStats(getTTSCacheStats());
-    } catch (err) {
-      console.error('❌ generateAudioForSection error:', err);
-      setAudioError('Failed to generate audio.');
-      setCurrentPlayingSection(null);
-      setCurrentPlayingText('');
-      setWords([]);
+
+      // Generate word timings
+      const wordTimings = generateWordTimings(textToSpeak, playbackRate);
+      setWords(wordTimings);
+      setDuration(wordTimings[wordTimings.length - 1]?.end || 0);
+      setCurrentPlayingText(textToSpeak);
+      setCurrentPlayingSection(sectionType);
+
+    } catch (error) {
+      setAudioError(`Failed to prepare audio: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsGeneratingAudio(false);
     }
-  }, [selectedVoiceId]);
+  }, [scrapedData, playbackRate, generateWordTimings]);
+
+  // New function to play queue items
+  const playQueueItem = useCallback(async (item: any) => {
+    if (!item || !item.content) return;
+
+    // Prevent multiple simultaneous calls
+    if (speechBusyRef.current) {
+      console.log('⚠️ Speech system busy, skipping request for:', item.title);
+      return;
+    }
+
+    console.log('🎵 Playing queue item:', item.title);
+    speechBusyRef.current = true;
+    
+    try {
+      // CRITICAL: Stop any existing speech synthesis FIRST and wait for it to clear
+      if (speechSynthesis.speaking) {
+        speechSynthesis.cancel();
+        // Give it more time to fully cancel and clear
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      
+      // Wait for speech synthesis to be ready
+      let attempts = 0;
+      while (speechSynthesis.speaking && attempts < 10) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
+      
+      // Clear all current audio state
+      setIsPlaying(false);
+      setIsPaused(false);
+      setCurrentWordIndex(-1);
+      setCurrentTime(0);
+      
+      // Clear any error states
+      setAudioError(null);
+      
+      // Generate audio and word timings first
+      await generateAudioForSection(item.id, item.content);
+      
+      // Start Web Speech API with proper error handling
+      const utterance = new SpeechSynthesisUtterance(item.content);
+      utterance.rate = playbackRate;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      
+      const voices = speechSynthesis.getVoices();
+      const preferredVoice = voices.find(voice => 
+        voice.name.includes('Alex') || 
+        voice.name.includes('Daniel') || 
+        voice.name.includes('Samantha') ||
+        voice.lang.includes('en')
+      );
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+      
+      utterance.onstart = () => {
+        const now = Date.now();
+        startTimeRef.current = now;
+        actualStartTimeRef.current = now;
+        pausedTimeRef.current = 0;
+        setIsPlaying(true);
+        setIsPaused(false);
+        console.log('🎵 Started playing:', item.title);
+      };
+      
+      utterance.onend = () => {
+        console.log('✅ Finished playing:', item.title);
+        speechBusyRef.current = false;
+        handleStop();
+        // Call queue completion callback if it exists
+        if (onQueueItemComplete) {
+          onQueueItemComplete();
+        }
+      };
+      
+      utterance.onerror = (event) => {
+        console.error('❌ Speech error for', item.title, ':', event.error);
+        speechBusyRef.current = false;
+        
+        // Only set error for serious errors, not interruptions
+        if (event.error !== 'interrupted' && event.error !== 'canceled') {
+          setAudioError(`Speech error: ${event.error}`);
+        }
+        setIsPlaying(false);
+      };
+      
+      utteranceRef.current = utterance;
+      
+      // Final check before speaking
+      if (!speechSynthesis.speaking) {
+        speechSynthesis.speak(utterance);
+      } else {
+        console.warn('⚠️ Speech synthesis still busy after waiting, cannot start');
+        speechBusyRef.current = false;
+        setAudioError('Audio system busy, please try again');
+      }
+      
+    } catch (error) {
+      speechBusyRef.current = false;
+      setAudioError(`Failed to start speech: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [generateAudioForSection, playbackRate, onQueueItemComplete, handleStop]);
+
+  const playSectionDirectly = useCallback(async (sectionId: string, content: string) => {
+    await generateAudioForSection(sectionId as PlayingSection, content);
+    
+    // Start Web Speech API
+    try {
+      speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(content);
+      utterance.rate = playbackRate;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      
+      const voices = speechSynthesis.getVoices();
+      const preferredVoice = voices.find(voice => 
+        voice.name.includes('Alex') || 
+        voice.name.includes('Daniel') || 
+        voice.name.includes('Samantha') ||
+        voice.lang.includes('en')
+      );
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+      
+      utterance.onstart = () => {
+        const now = Date.now();
+        startTimeRef.current = now;
+        actualStartTimeRef.current = now;
+        pausedTimeRef.current = 0;
+        setIsPlaying(true);
+        setIsPaused(false);
+      };
+      
+      utterance.onend = () => {
+        handleStop();
+      };
+      
+      utterance.onerror = (event) => {
+        setAudioError(`Speech error: ${event.error}`);
+        setIsPlaying(false);
+      };
+      
+      utteranceRef.current = utterance;
+      speechSynthesis.speak(utterance);
+      
+    } catch (error) {
+      setAudioError(`Failed to start speech: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [generateAudioForSection, playbackRate]);
 
   const handlePlayPause = useCallback(() => {
-    console.log('🎵 handlePlayPause called:', { 
-      hasAudioRef: !!audioRef.current, 
-      hasAudioUrl: !!audioUrl, 
-      isPlaying
-    });
-    
-    if (!audioRef.current || !audioUrl) {
-      console.error('❌ Cannot play: missing audioRef or audioUrl');
-      return;
-    }
-    
     if (isPlaying) {
-      audioRef.current.pause();
+      // Pause
+      if (speechSynthesis.speaking) {
+        speechSynthesis.cancel();
+        setIsPaused(true);
+        setIsPlaying(false);
+        pausedTimeRef.current = Date.now();
+      }
+    } else if (isPaused) {
+      // Resume from current position
+      if (currentPlayingText && words.length > 0) {
+        try {
+          speechSynthesis.cancel();
+          
+          // Find the current word position
+          const currentTimeInSeconds = currentTime;
+          const startWordIndex = Math.max(0, currentWordIndex);
+          
+          // Create text starting from current position
+          const textWords = currentPlayingText.split(' ');
+          const remainingWords = textWords.slice(startWordIndex);
+          const remainingText = remainingWords.join(' ');
+          
+          if (remainingText.trim()) {
+            const utterance = new SpeechSynthesisUtterance(remainingText);
+            utterance.rate = playbackRate;
+            utterance.pitch = 1;
+            utterance.volume = 1;
+            
+            const voices = speechSynthesis.getVoices();
+            const preferredVoice = voices.find(voice => 
+              voice.name.includes('Alex') || 
+              voice.name.includes('Daniel') || 
+              voice.name.includes('Samantha') ||
+              voice.lang.includes('en')
+            );
+            if (preferredVoice) {
+              utterance.voice = preferredVoice;
+            }
+            
+            utterance.onstart = () => {
+              const now = Date.now();
+              // Calculate the offset time so timing continues from where we paused
+              actualStartTimeRef.current = now - (currentTimeInSeconds * 1000);
+              startTimeRef.current = actualStartTimeRef.current;
+              setIsPlaying(true);
+              setIsPaused(false);
+              pausedTimeRef.current = 0;
+            };
+            
+            utterance.onend = () => {
+              handleStop();
+              if (onQueueItemComplete) {
+                onQueueItemComplete();
+              }
+            };
+            
+            utterance.onerror = (event) => {
+              if (event.error !== 'interrupted' && event.error !== 'canceled') {
+                setAudioError(`Speech error: ${event.error}`);
+              }
+              setIsPlaying(false);
+            };
+            
+            utteranceRef.current = utterance;
+            speechSynthesis.speak(utterance);
+          } else {
+            setIsPaused(false);
+          }
+          
+        } catch (error) {
+          setAudioError(`Failed to resume speech: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          setIsPaused(false);
+        }
+      }
     } else {
-      audioRef.current.play().catch(error => {
-        console.error('❌ Audio play error:', error);
-      });
+      // Start playing current section or queue item
+      if (currentPlayingText) {
+        playSectionDirectly(currentPlayingSection || 'unknown', currentPlayingText);
+      }
     }
-  }, [audioUrl, isPlaying]);
-
-  const handleStop = useCallback(() => {
-    if (audioRef.current) audioRef.current.pause();
-    if (audioRef.current) audioRef.current.currentTime = 0;
-    setCurrentPlayingSection(null);
-    setCurrentPlayingText('');
-    setWords([]);
-    if (audioUrl) cleanupAudioUrl(audioUrl);
-    setAudioUrl(null);
-  }, [audioUrl]);
+  }, [isPlaying, isPaused, currentPlayingText, currentPlayingSection, currentTime, currentWordIndex, words, playbackRate, onQueueItemComplete, handleStop, playSectionDirectly]);
 
   const handleSeek = useCallback((newTime: number) => {
-    if (audioRef.current) audioRef.current.currentTime = newTime;
-  }, []);
-
-  const handleWordClick = useCallback((index: number) => {
-    const word = words[index];
-    if (!word || !audioRef.current) return;
-    audioRef.current.currentTime = word.start;
+    if (words.length > 0) {
+      const newWordIndex = words.findIndex(timing => 
+        newTime >= timing.start && newTime < timing.end
+      );
+      
+      if (newWordIndex !== -1) {
+        setCurrentWordIndex(newWordIndex);
+        setCurrentTime(newTime);
+        actualStartTimeRef.current = Date.now() - (newTime * 1000);
+        startTimeRef.current = actualStartTimeRef.current;
+      }
+    }
   }, [words]);
 
-  const handleSpeedChange = useCallback((rate: number) => {
-    if (!audioRef.current) return;
-    setPlaybackRate(rate);
+  const handleWordClick = useCallback((wordIndex: number) => {
+    if (words[wordIndex]) {
+      handleSeek(words[wordIndex].start);
+    }
+  }, [words, handleSeek]);
+
+  const handleSpeedChange = useCallback((newRate: number) => {
+    const wasPlaying = isPlaying;
+    if (wasPlaying) {
+      handleStop();
+    }
+    setPlaybackRate(newRate);
     setHasSelectedSpeed(true);
-    audioRef.current.playbackRate = rate;
-  }, []);
+    
+    // Regenerate word timings with new speed
+    if (currentPlayingText) {
+      const newWords = generateWordTimings(currentPlayingText, newRate);
+      setWords(newWords);
+      setDuration(newWords[newWords.length - 1]?.end || 0);
+    }
+    
+    if (wasPlaying) {
+      setTimeout(() => {
+        if (currentPlayingText) {
+          playSectionDirectly(currentPlayingSection || 'unknown', currentPlayingText);
+        }
+      }, 100);
+    }
+  }, [isPlaying, currentPlayingText, currentPlayingSection, generateWordTimings, handleStop, playSectionDirectly]);
 
   const clearAudio = useCallback(() => {
-    console.log('🧹 clearAudio called - this will clear currentPlayingText!');
-    
-    if (audioRef.current) audioRef.current.pause();
-    if (audioUrl) cleanupAudioUrl(audioUrl);
-    setAudioUrl(null);
+    handleStop();
     setCurrentPlayingSection(null);
     setCurrentPlayingText('');
     setWords([]);
-    setIsPlaying(false);
-  }, [audioUrl]);
+    setDuration(0);
+    setAudioError(null);
+  }, [handleStop]);
 
-  // New function for direct play from ContentCard (moved from ContentCard.tsx)
-  const playSectionDirectly = useCallback(async (sectionId: string, content: string) => {
-    console.log('🎯 Direct play called for:', { sectionId, contentLength: content.length });
-    
-    if (!content || content.trim().length === 0) {
-      console.error('❌ No content to play');
-      return;
-    }
-
-    try {
-      // Clear any existing audio first
-      clearAudio();
-      
-      console.log('🎯 Starting direct audio generation...');
-      await generateAudioForSection(sectionId as PlayingSection, content);
-      console.log('✅ Audio generation completed, starting playback...');
-      
-      // Start playing immediately after generation
-      setTimeout(() => {
-        handlePlayPause();
-      }, 200);
-    } catch (error) {
-      console.error('❌ Error in direct play:', error);
-    }
-  }, [generateAudioForSection, clearAudio, handlePlayPause]);
-
-  const handleClearCache = useCallback(() => {
-    if (process.env.NODE_ENV === 'development') {
-      import('@/lib/tts').then(async ({ clearTTSCache }) => {
-        const success = await clearTTSCache();
-        if (success) setCacheStats(getTTSCacheStats());
-      });
-    }
+  const formatTime = useCallback((seconds: number): string => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   }, []);
 
-  const formatTime = useCallback((s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`, []);
-
-  // Audio event handlers
-  useEffect(() => {
-    if (!audioRef.current || !audioUrl) return;
-    const audio = audioRef.current;
-    const setDur = () => setDuration(audio.duration);
-    const syncTime = () => setCurrentTime(audio.currentTime);
-    audio.addEventListener('loadedmetadata', setDur);
-    audio.addEventListener('timeupdate', syncTime);
-    return () => {
-      audio.removeEventListener('loadedmetadata', setDur);
-      audio.removeEventListener('timeupdate', syncTime);
-    };
-  }, [audioUrl]);
+  const value: AudioContextType = {
+    audioUrl: null, // Web Speech API doesn't use URLs
+    audioRef,
+    isGeneratingAudio,
+    audioError,
+    duration,
+    currentTime,
+    isPlaying,
+    playbackRate,
+    hasSelectedSpeed,
+    currentWordIndex,
+    currentPlayingSection,
+    currentPlayingText,
+    words,
+    isMaximized,
+    isTransitioning,
+    isPreloading,
+    generateAudioForSection,
+    playSectionDirectly,
+    playQueueItem,
+    handlePlayPause,
+    handleStop,
+    handleSeek,
+    handleWordClick,
+    handleSpeedChange,
+    setIsMaximized,
+    setIsPreloading,
+    setCurrentPlayingSection,
+    setCurrentPlayingText,
+    setWords,
+    setAudioUrl: () => {}, // No-op for Web Speech API
+    clearAudio,
+    formatTime,
+    onQueueItemComplete,
+    setOnQueueItemComplete,
+  };
 
   return (
-    <AudioContext.Provider value={{
-      audioUrl,
-      audioRef,
-      isGeneratingAudio,
-      audioError,
-      duration,
-      currentTime,
-      isPlaying,
-      playbackRate,
-      hasSelectedSpeed,
-      currentWordIndex,
-      currentPlayingSection,
-      currentPlayingText,
-      words,
-      isMaximized,
-      isTransitioning,
-      isPreloading,
-      cacheStats,
-      generateAudioForSection,
-      playSectionDirectly,
-      handlePlayPause,
-      handleStop,
-      handleSeek,
-      handleWordClick,
-      handleSpeedChange,
-      setIsMaximized,
-      setIsPreloading,
-      setCurrentPlayingSection,
-      setCurrentPlayingText: wrappedSetCurrentPlayingText,
-      setWords,
-      setAudioUrl,
-      clearAudio,
-      handleClearCache,
-      formatTime,
-    }}>
+    <AudioContext.Provider value={value}>
       {children}
-      {/* Always render audio element to keep ref stable */}
-      <audio
-        ref={audioRef}
-        src={audioUrl ?? undefined} // Use undefined to remove the attribute when audioUrl is null
-        preload="auto"
-        onPlay={() => {
-          console.log('Audio element: onPlay event fired');
-          setIsPlaying(true);
-        }}
-        onPause={() => {
-          console.log('Audio element: onPause event fired');
-          setIsPlaying(false);
-        }}
-        onLoadedData={() => {
-          console.log('Audio element: onLoadedData fired, duration:', audioRef.current?.duration);
-          if (audioRef.current) {
-            const audioDuration = audioRef.current.duration;
-            setDuration(audioDuration);
-            
-            // Generate word timings if we don't have real ones from ElevenLabs
-            if (currentPlayingText && words.length === 0 && audioDuration > 0) {
-              console.log('🎯 No real word timings available, generating intelligent fallback timings');
-              // This fallback logic is no longer needed as we rely on API word timings
-              // const generatedTimings = generateWordTimings(currentPlayingText, audioDuration);
-              // if (generatedTimings.length > 0) {
-              //   setWords(generatedTimings);
-              //   console.log('✅ Fallback word timings set:', generatedTimings.length, 'words');
-              // }
-            }
-          }
-        }}
-        onCanPlay={() => {
-          // Automatically play when new audio is ready
-          console.log('Audio element: onCanPlay fired - ready for automatic playback');
-          if (audioRef.current && audioUrl && !isPlaying) {
-            audioRef.current.play().catch(e => console.error("Auto-play failed", e));
-          }
-        }}
-        onTimeUpdate={() => {
-          if (audioRef.current) {
-            setCurrentTime(audioRef.current.currentTime);
-          }
-        }}
-        onError={(e) => {
-          console.error('Audio element: onError fired', e);
-          setAudioError('Audio playback failed');
-          setIsPlaying(false);
-        }}
-        onEnded={() => {
-          // This will be used for auto-playing the next item in the queue
-          console.log('AudioContext: onEnded event fired');
-          setIsPlaying(false);
-          setCurrentTime(0);
-          // The QueueContext will listen for this and trigger the next item
-        }}
-      />
     </AudioContext.Provider>
   );
-};
+}; 
