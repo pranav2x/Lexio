@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Play, Pause, SkipBack, SkipForward, Volume2 } from "lucide-react";
 import { useLexioState } from "@/lib/store";
 import { useQueue } from "@/contexts/QueueContext";
+import { VoiceSelector } from "@/components/read/VoiceSelector";
+import { SpeedSelector } from "@/components/read/SpeedSelector";
 
 // Main MaximizedPlayer Content Component
 const MaximizedPlayerContent: React.FC = () => {
@@ -31,6 +33,8 @@ const MaximizedPlayerContent: React.FC = () => {
   const [wordTimings, setWordTimings] = useState<Array<{word: string; start: number; end: number}>>([]);
   const [timeOffset, setTimeOffset] = useState(0);
   const [error, setError] = useState('');
+  const [selectedVoiceId, setSelectedVoiceId] = useState('4tRn1lSkEn13EVTuqb0g'); // Default voice
+  const [selectedSpeed, setSelectedSpeed] = useState(1.0); // Default speed
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const startTimeRef = useRef(0);
@@ -42,15 +46,61 @@ const MaximizedPlayerContent: React.FC = () => {
   const currentItem = listeningQueue[currentQueueIndex];
   const words = currentItem ? currentItem.content.split(' ') : [];
 
+  // Load voice and speed preferences from localStorage
+  useEffect(() => {
+    const savedVoiceId = localStorage.getItem('lexio-selected-voice');
+    if (savedVoiceId) {
+      setSelectedVoiceId(savedVoiceId);
+    }
+    
+    const savedSpeed = localStorage.getItem('lexio-selected-speed');
+    if (savedSpeed) {
+      setSelectedSpeed(parseFloat(savedSpeed));
+    }
+  }, []);
+
+  // Handle voice selection change
+  const handleVoiceChange = (voiceId: string) => {
+    setSelectedVoiceId(voiceId);
+    localStorage.setItem('lexio-selected-voice', voiceId);
+    
+    // Stop current playback if playing
+    if (isPlaying || isPaused) {
+      stopAudio();
+    }
+    
+    // Clear cached audio when voice changes so it regenerates with new voice
+    audioUrlRef.current = null;
+  };
+
+  // Handle speed selection change
+  const handleSpeedChange = (speed: number) => {
+    setSelectedSpeed(speed);
+    localStorage.setItem('lexio-selected-speed', speed.toString());
+    
+    // Stop current playback if playing
+    if (isPlaying || isPaused) {
+      stopAudio();
+    }
+    
+    // Clear cached audio when speed changes so it regenerates with new speed
+    audioUrlRef.current = null;
+  };
+
   // Auto-generate audio when item changes
   useEffect(() => {
     if (currentItem && !audioUrlRef.current) {
       // Pre-generate audio for better UX when user clicks play
-      generateAudio().then(audioUrl => {
-        if (audioUrl) {
-          audioUrlRef.current = audioUrl;
-        }
-      });
+      // Use chunking for long texts for faster initial generation
+      const shouldPreGenerate = currentItem.content.length < 5000; // Only pre-generate for shorter texts
+      
+      if (shouldPreGenerate) {
+        generateAudio(false).then(audioUrl => {
+          if (audioUrl) {
+            audioUrlRef.current = audioUrl;
+          }
+        });
+      }
     }
   }, [currentItem]);
 
@@ -100,7 +150,7 @@ const MaximizedPlayerContent: React.FC = () => {
       }
       
       if (adjustedTime >= duration) {
-        stopSpeech();
+        stopAudio();
       }
     }
   };
@@ -182,14 +232,19 @@ const MaximizedPlayerContent: React.FC = () => {
     router.push("/read");
   };
 
-  // Generate audio using ElevenLabs
-  const generateAudio = async () => {
+  // Generate audio using ElevenLabs with optimizations
+  const generateAudio = async (useStreaming: boolean = false) => {
     if (!currentItem) return null;
     
     setIsLoading(true);
     setError('');
     
     try {
+      const textLength = currentItem.content.length;
+      const shouldUseChunking = textLength > 2000;
+      
+      console.log(`Generating audio for ${textLength} characters, chunking: ${shouldUseChunking}, streaming: ${useStreaming}`);
+      
       const response = await fetch('/api/elevenlabs-tts', {
         method: 'POST',
         headers: {
@@ -197,7 +252,10 @@ const MaximizedPlayerContent: React.FC = () => {
         },
         body: JSON.stringify({
           text: currentItem.content,
-          voiceId: '4tRn1lSkEn13EVTuqb0g'
+          voiceId: selectedVoiceId,
+          stream: useStreaming,
+          useChunking: shouldUseChunking && !useStreaming,
+          speed: selectedSpeed
         }),
       });
 
@@ -207,7 +265,21 @@ const MaximizedPlayerContent: React.FC = () => {
         throw new Error(errorData.error || `HTTP ${response.status}: Failed to generate audio`);
       }
 
-      const { audio, contentType } = await response.json();
+      // Handle streaming response
+      if (useStreaming) {
+        const audioUrl = URL.createObjectURL(response.body as any);
+        return audioUrl;
+      }
+
+      const responseData = await response.json();
+      
+      // Handle chunked response
+      if (responseData.chunks) {
+        return await handleChunkedAudio(responseData.chunks);
+      }
+
+      // Handle regular response
+      const { audio, contentType } = responseData;
       
       // Convert base64 to blob URL
       const audioBlob = new Blob(
@@ -227,6 +299,44 @@ const MaximizedPlayerContent: React.FC = () => {
     }
   };
 
+  // Handle chunked audio by combining chunks
+  const handleChunkedAudio = async (chunks: Array<{index: number, audio: string, text: string}>) => {
+    try {
+      // Sort chunks by index to ensure correct order
+      chunks.sort((a, b) => a.index - b.index);
+      
+      // Convert all base64 chunks to audio buffers
+      const audioBuffers = chunks.map(chunk => {
+        const binaryString = atob(chunk.audio);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes;
+      });
+      
+      // Calculate total length
+      const totalLength = audioBuffers.reduce((sum, buffer) => sum + buffer.length, 0);
+      
+      // Combine all audio buffers
+      const combinedBuffer = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const buffer of audioBuffers) {
+        combinedBuffer.set(buffer, offset);
+        offset += buffer.length;
+      }
+      
+      // Create blob and URL
+      const audioBlob = new Blob([combinedBuffer], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      return audioUrl;
+    } catch (error) {
+      console.error('Error combining chunked audio:', error);
+      throw new Error('Failed to combine audio chunks');
+    }
+  };
+
   // Start audio playback
   const startAudio = async () => {
     if (!currentItem) return;
@@ -235,10 +345,14 @@ const MaximizedPlayerContent: React.FC = () => {
       // Generate word timings first
       const timings = generateWordTimings();
       
-      // Get or generate audio
+      // Get or generate audio with streaming for faster perceived performance
       let audioUrl = audioUrlRef.current;
       if (!audioUrl) {
-        audioUrl = await generateAudio();
+        // Try streaming first for faster start, fallback to regular if needed
+        const textLength = currentItem.content.length;
+        const useStreaming = textLength < 3000; // Use streaming for shorter texts
+        
+        audioUrl = await generateAudio(useStreaming);
         if (!audioUrl) return;
         audioUrlRef.current = audioUrl;
       }
@@ -371,22 +485,6 @@ const MaximizedPlayerContent: React.FC = () => {
               <ArrowLeft size={16} />
               <span className="text-sm">Back to Reading</span>
             </button>
-            
-            {/* Temporary test button */}
-            <button
-              onClick={async () => {
-                try {
-                  const response = await fetch('/api/test-elevenlabs');
-                  const result = await response.json();
-                  alert(JSON.stringify(result, null, 2));
-                } catch (err) {
-                  alert('Test failed: ' + err);
-                }
-              }}
-              className="px-3 py-1 bg-blue-500/20 text-white text-xs rounded hover:bg-blue-500/30"
-            >
-              Test ElevenLabs
-            </button>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center p-4">
@@ -420,7 +518,18 @@ const MaximizedPlayerContent: React.FC = () => {
             <p className="text-lg font-semibold">{scrapedData?.title}</p>
           </div>
           
-          <div className="w-24"></div> {/* Spacer for centering */}
+          {/* Voice and Speed Selectors */}
+          <div className="flex gap-3">
+            <VoiceSelector
+              selectedVoiceId={selectedVoiceId}
+              onVoiceChange={handleVoiceChange}
+              selectedSpeed={selectedSpeed}
+            />
+            <SpeedSelector
+              selectedSpeed={selectedSpeed}
+              onSpeedChange={handleSpeedChange}
+            />
+          </div>
         </div>
       </div>
 
@@ -441,7 +550,7 @@ const MaximizedPlayerContent: React.FC = () => {
           {isLoading && (
             <div className="mb-4 p-3 bg-blue-900/50 border border-blue-700/50 rounded-lg text-blue-100 text-sm flex items-center justify-center gap-2">
               <div className="w-4 h-4 border-2 border-blue-300 border-t-transparent rounded-full animate-spin" />
-              Generating audio with ElevenLabs...
+              Lexio is generating audio...
             </div>
           )}
           

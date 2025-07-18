@@ -16,11 +16,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { text, voiceId = DEFAULT_VOICE_ID } = await request.json();
+    const { text, voiceId = DEFAULT_VOICE_ID, stream = false, useChunking = false, speed = 1.0 } = await request.json();
     
     console.log('Request details:', {
       textLength: text?.length,
       voiceId,
+      stream,
+      useChunking,
       hasApiKey: !!ELEVENLABS_API_KEY
     });
 
@@ -29,6 +31,16 @@ export async function POST(request: NextRequest) {
         { error: 'Text is required' },
         { status: 400 }
       );
+    }
+
+    // If streaming is requested, use streaming endpoint
+    if (stream) {
+      return handleStreamingRequest(text, voiceId, speed);
+    }
+
+    // For very long texts, use chunking
+    if (useChunking && text.length > 2000) {
+      return handleChunkedRequest(text, voiceId, speed);
     }
 
     // Call ElevenLabs API
@@ -47,7 +59,8 @@ export async function POST(request: NextRequest) {
           stability: 0.5,
           similarity_boost: 0.75,
           style: 0.0,
-          use_speaker_boost: true
+          use_speaker_boost: true,
+          speed: speed
         }
       }),
     });
@@ -91,6 +104,156 @@ export async function POST(request: NextRequest) {
     console.error('ElevenLabs TTS error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+async function handleStreamingRequest(text: string, voiceId: string, speed: number = 1.0) {
+  try {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'Content-Type': 'application/json',
+        'xi-api-key': ELEVENLABS_API_KEY!,
+      },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_turbo_v2',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.0,
+          use_speaker_boost: true,
+          speed: speed
+        }
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('ElevenLabs streaming API error:', errorText);
+      throw new Error(`ElevenLabs API error: ${response.status}`);
+    }
+
+    // Create a readable stream that forwards the ElevenLabs stream
+    const stream = new ReadableStream({
+      start(controller) {
+        const reader = response.body?.getReader();
+        if (!reader) {
+          controller.error(new Error('No response body'));
+          return;
+        }
+
+        function pump(): Promise<void> {
+          return reader!.read().then(({ done, value }) => {
+            if (done) {
+              controller.close();
+              return;
+            }
+            controller.enqueue(value);
+            return pump();
+          });
+        }
+
+        return pump();
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'audio/mpeg',
+        'Transfer-Encoding': 'chunked',
+      },
+    });
+
+  } catch (error) {
+    console.error('Streaming error:', error);
+    return NextResponse.json(
+      { error: 'Streaming failed' },
+      { status: 500 }
+    );
+  }
+}
+
+function chunkText(text: string, maxChunkSize: number = 1500): string[] {
+  const sentences = text.split(/[.!?]+/).filter(sentence => sentence.trim().length > 0);
+  const chunks: string[] = [];
+  let currentChunk = '';
+
+  for (const sentence of sentences) {
+    const trimmedSentence = sentence.trim();
+    if (!trimmedSentence) continue;
+
+    // If adding this sentence would exceed the limit, save current chunk and start new one
+    if (currentChunk.length + trimmedSentence.length > maxChunkSize && currentChunk.length > 0) {
+      chunks.push(currentChunk.trim() + '.');
+      currentChunk = trimmedSentence;
+    } else {
+      currentChunk += (currentChunk ? '. ' : '') + trimmedSentence;
+    }
+  }
+
+  // Add the last chunk if it exists
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim() + '.');
+  }
+
+  return chunks;
+}
+
+async function handleChunkedRequest(text: string, voiceId: string, speed: number = 1.0) {
+  try {
+    const chunks = chunkText(text);
+    console.log(`Processing ${chunks.length} chunks for text of length ${text.length}`);
+    
+    // Generate audio for all chunks in parallel
+    const audioPromises = chunks.map(async (chunk, index) => {
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: 'POST',
+        headers: {
+          'Accept': 'audio/mpeg',
+          'Content-Type': 'application/json',
+          'xi-api-key': ELEVENLABS_API_KEY!,
+        },
+        body: JSON.stringify({
+          text: chunk,
+          model_id: 'eleven_turbo_v2',
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.0,
+            use_speaker_boost: true,
+            speed: speed
+          }
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Chunk ${index} failed: ${response.status}`);
+      }
+
+      const audioBuffer = await response.arrayBuffer();
+      return {
+        index,
+        audio: Buffer.from(audioBuffer).toString('base64'),
+        text: chunk
+      };
+    });
+
+    const audioChunks = await Promise.all(audioPromises);
+    
+    return NextResponse.json({
+      chunks: audioChunks,
+      contentType: 'audio/mpeg',
+      totalChunks: chunks.length
+    });
+
+  } catch (error) {
+    console.error('Chunking error:', error);
+    return NextResponse.json(
+      { error: 'Chunked processing failed' },
       { status: 500 }
     );
   }
