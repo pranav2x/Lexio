@@ -22,6 +22,7 @@ const MaximizedPlayerContent: React.FC = () => {
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [currentProgress, setCurrentProgress] = useState(0);
   const [volume, setVolume] = useState(1);
   const [currentWordIndex, setCurrentWordIndex] = useState(-1);
@@ -29,25 +30,29 @@ const MaximizedPlayerContent: React.FC = () => {
   const [duration, setDuration] = useState(0);
   const [wordTimings, setWordTimings] = useState<Array<{word: string; start: number; end: number}>>([]);
   const [timeOffset, setTimeOffset] = useState(0);
+  const [error, setError] = useState('');
   
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const startTimeRef = useRef(0);
   const pausedTimeRef = useRef(0);
   const timeUpdateInterval = useRef<NodeJS.Timeout | null>(null);
   const actualStartTimeRef = useRef(0);
+  const audioUrlRef = useRef<string | null>(null);
 
   const currentItem = listeningQueue[currentQueueIndex];
   const words = currentItem ? currentItem.content.split(' ') : [];
 
-  // Debug logging
+  // Auto-generate audio when item changes
   useEffect(() => {
-    console.log('MaximizedPlayer Debug:', {
-      queueLength: listeningQueue.length,
-      currentIndex: currentQueueIndex,
-      hasCurrentItem: !!currentItem,
-      queue: listeningQueue
-    });
-  }, [listeningQueue, currentQueueIndex, currentItem]);
+    if (currentItem && !audioUrlRef.current) {
+      // Pre-generate audio for better UX when user clicks play
+      generateAudio().then(audioUrl => {
+        if (audioUrl) {
+          audioUrlRef.current = audioUrl;
+        }
+      });
+    }
+  }, [currentItem]);
 
   // Generate word timings based on text analysis
   const generateWordTimings = () => {
@@ -100,9 +105,12 @@ const MaximizedPlayerContent: React.FC = () => {
     }
   };
 
-  // Stop speech synthesis
-  const stopSpeech = () => {
-    speechSynthesis.cancel();
+  // Stop audio playback
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
     setIsPlaying(false);
     setIsPaused(false);
     setCurrentWordIndex(-1);
@@ -111,6 +119,7 @@ const MaximizedPlayerContent: React.FC = () => {
     actualStartTimeRef.current = 0;
     pausedTimeRef.current = 0;
     setTimeOffset(0);
+    setError('');
   };
 
   useEffect(() => {
@@ -146,13 +155,23 @@ const MaximizedPlayerContent: React.FC = () => {
 
   // Reset state when current item changes
   useEffect(() => {
-    stopSpeech();
+    stopAudio();
+    // Clear cached audio URL for new item
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
   }, [currentQueueIndex]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      speechSynthesis.cancel();
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+      }
       if (timeUpdateInterval.current) {
         clearInterval(timeUpdateInterval.current);
       }
@@ -163,32 +182,77 @@ const MaximizedPlayerContent: React.FC = () => {
     router.push("/read");
   };
 
-  // Start speech synthesis
-  const startSpeech = () => {
+  // Generate audio using ElevenLabs
+  const generateAudio = async () => {
+    if (!currentItem) return null;
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const response = await fetch('/api/elevenlabs-tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: currentItem.content,
+          voiceId: '4tRn1lSkEn13EVTuqb0g'
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('TTS API Error:', errorData);
+        throw new Error(errorData.error || `HTTP ${response.status}: Failed to generate audio`);
+      }
+
+      const { audio, contentType } = await response.json();
+      
+      // Convert base64 to blob URL
+      const audioBlob = new Blob(
+        [Uint8Array.from(atob(audio), c => c.charCodeAt(0))], 
+        { type: contentType }
+      );
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      return audioUrl;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to generate audio';
+      setError(errorMessage);
+      console.error('ElevenLabs TTS error:', err);
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Start audio playback
+  const startAudio = async () => {
     if (!currentItem) return;
     
     try {
-      speechSynthesis.cancel();
-      
+      // Generate word timings first
       const timings = generateWordTimings();
       
-      const utterance = new SpeechSynthesisUtterance(currentItem.content);
-      utterance.rate = 1;
-      utterance.pitch = 1;
-      utterance.volume = volume;
-      
-      const voices = speechSynthesis.getVoices();
-      const preferredVoice = voices.find(voice => 
-        voice.name.includes('Alex') || 
-        voice.name.includes('Daniel') || 
-        voice.name.includes('Samantha') ||
-        voice.lang.includes('en')
-      );
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
+      // Get or generate audio
+      let audioUrl = audioUrlRef.current;
+      if (!audioUrl) {
+        audioUrl = await generateAudio();
+        if (!audioUrl) return;
+        audioUrlRef.current = audioUrl;
       }
       
-      utterance.onstart = () => {
+      // Create audio element if it doesn't exist
+      if (!audioRef.current) {
+        audioRef.current = new Audio();
+      }
+      
+      const audio = audioRef.current;
+      audio.src = audioUrl;
+      audio.volume = volume;
+      
+      audio.onloadedmetadata = () => {
         const now = Date.now();
         startTimeRef.current = now;
         actualStartTimeRef.current = now;
@@ -196,132 +260,92 @@ const MaximizedPlayerContent: React.FC = () => {
         setIsPlaying(true);
         setIsPaused(false);
         
+        // Slight timing adjustment for better synchronization
         setTimeout(() => {
           if (isPlaying && currentWordIndex < 2) {
-            setTimeOffset(prev => prev - 0.3);
+            setTimeOffset(prev => prev - 0.2);
           }
-        }, 1000);
+        }, 500);
       };
       
-      utterance.onend = () => {
-        stopSpeech();
+      audio.onended = () => {
+        stopAudio();
         handleControlsNext();
       };
       
-      utterance.onerror = (event) => {
-        if (event.error !== 'interrupted' && event.error !== 'canceled') {
-          console.error(`Speech error: ${event.error}`);
-        }
+      audio.onerror = () => {
+        setError('Failed to play audio');
         setIsPlaying(false);
       };
       
-      utteranceRef.current = utterance;
-      speechSynthesis.speak(utterance);
+      await audio.play();
       
     } catch (err) {
-      console.error(`Failed to start speech: ${(err as Error).message}`);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to start audio';
+      setError(errorMessage);
+      console.error('Failed to start audio:', err);
     }
   };
 
-  // Pause speech synthesis
-  const pauseSpeech = () => {
-    if (speechSynthesis.speaking) {
-      speechSynthesis.cancel();
+  // Pause audio playback
+  const pauseAudio = () => {
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause();
       setIsPaused(true);
       setIsPlaying(false);
       pausedTimeRef.current = Date.now();
     }
   };
 
-  // Resume speech synthesis from current position
-  const resumeSpeech = () => {
-    if (isPaused && wordTimings.length > 0 && currentItem) {
+  // Resume audio playback
+  const resumeAudio = async () => {
+    if (isPaused && audioRef.current) {
       try {
-        speechSynthesis.cancel();
+        const now = Date.now();
+        // Adjust timing to account for pause duration
+        actualStartTimeRef.current = now - (currentTime * 1000);
+        startTimeRef.current = actualStartTimeRef.current;
         
-        // Find the current word position
-        const startWordIndex = Math.max(0, currentWordIndex);
-        
-        // Create text starting from current position
-        const remainingWords = words.slice(startWordIndex);
-        const remainingText = remainingWords.join(' ');
-        
-        if (remainingText.trim()) {
-          const utterance = new SpeechSynthesisUtterance(remainingText);
-          utterance.rate = 1;
-          utterance.pitch = 1;
-          utterance.volume = volume;
-          
-          const voices = speechSynthesis.getVoices();
-          const preferredVoice = voices.find(voice => 
-            voice.name.includes('Alex') || 
-            voice.name.includes('Daniel') || 
-            voice.name.includes('Samantha') ||
-            voice.lang.includes('en')
-          );
-          if (preferredVoice) {
-            utterance.voice = preferredVoice;
-          }
-          
-          utterance.onstart = () => {
-            const now = Date.now();
-            actualStartTimeRef.current = now - (currentTime * 1000);
-            startTimeRef.current = actualStartTimeRef.current;
-            setIsPlaying(true);
-            setIsPaused(false);
-            pausedTimeRef.current = 0;
-          };
-          
-          utterance.onend = () => {
-            stopSpeech();
-            handleControlsNext();
-          };
-          
-          utterance.onerror = (event) => {
-            if (event.error !== 'interrupted' && event.error !== 'canceled') {
-              console.error(`Speech error: ${event.error}`);
-            }
-            setIsPlaying(false);
-          };
-          
-          utteranceRef.current = utterance;
-          speechSynthesis.speak(utterance);
-        } else {
-          setIsPaused(false);
-        }
-        
+        await audioRef.current.play();
+        setIsPlaying(true);
+        setIsPaused(false);
+        pausedTimeRef.current = 0;
       } catch (err) {
-        console.error(`Failed to resume speech: ${(err as Error).message}`);
+        const errorMessage = err instanceof Error ? err.message : 'Failed to resume audio';
+        setError(errorMessage);
+        console.error('Failed to resume audio:', err);
         setIsPaused(false);
       }
     }
   };
 
-  const handlePlayPause = () => {
+  const handlePlayPause = async () => {
     if (!currentItem) return;
     
     if (isPlaying) {
-      pauseSpeech();
+      pauseAudio();
     } else if (isPaused) {
-      resumeSpeech();
+      await resumeAudio();
     } else {
-      startSpeech();
+      await startAudio();
     }
   };
 
   const handleNext = () => {
-    stopSpeech();
+    stopAudio();
     handleControlsNext();
   };
 
   const handlePrevious = () => {
-    stopSpeech();
+    stopAudio();
     handleControlsPrevious();
   };
 
   const handleVolumeChange = (newVolume: number) => {
     setVolume(newVolume);
-    // Note: Web Speech API volume change requires recreation of utterance
+    if (audioRef.current) {
+      audioRef.current.volume = newVolume;
+    }
   };
 
   if (!scrapedData) {
@@ -348,12 +372,20 @@ const MaximizedPlayerContent: React.FC = () => {
               <span className="text-sm">Back to Reading</span>
             </button>
             
-            {/* Debug button */}
+            {/* Temporary test button */}
             <button
-              onClick={() => console.log('Queue Debug:', { listeningQueue, currentQueueIndex })}
-              className="px-3 py-1 bg-red-500/20 text-white text-xs rounded"
+              onClick={async () => {
+                try {
+                  const response = await fetch('/api/test-elevenlabs');
+                  const result = await response.json();
+                  alert(JSON.stringify(result, null, 2));
+                } catch (err) {
+                  alert('Test failed: ' + err);
+                }
+              }}
+              className="px-3 py-1 bg-blue-500/20 text-white text-xs rounded hover:bg-blue-500/30"
             >
-              Debug Queue
+              Test ElevenLabs
             </button>
           </div>
         </div>
@@ -397,6 +429,22 @@ const MaximizedPlayerContent: React.FC = () => {
         {/* Content Display */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold mb-4">{currentItem.title}</h1>
+          
+          {/* Error Display */}
+          {error && (
+            <div className="mb-4 p-3 bg-red-900/50 border border-red-700/50 rounded-lg text-red-100 text-sm">
+              {error}
+            </div>
+          )}
+          
+          {/* Loading Display */}
+          {isLoading && (
+            <div className="mb-4 p-3 bg-blue-900/50 border border-blue-700/50 rounded-lg text-blue-100 text-sm flex items-center justify-center gap-2">
+              <div className="w-4 h-4 border-2 border-blue-300 border-t-transparent rounded-full animate-spin" />
+              Generating audio with ElevenLabs...
+            </div>
+          )}
+          
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6 max-h-96 overflow-y-auto">
             <div className="text-white/80 leading-relaxed text-lg text-left">
               {words.map((word, index) => (
@@ -444,10 +492,17 @@ const MaximizedPlayerContent: React.FC = () => {
           
           <button
             onClick={handlePlayPause}
-            className="p-4 bg-white/20 hover:bg-white/30 text-white rounded-full transition-all duration-300 hover:scale-105"
-            title={isPlaying ? "Pause" : isPaused ? "Resume" : "Play"}
+            disabled={isLoading}
+            className="p-4 bg-white/20 hover:bg-white/30 disabled:bg-white/10 disabled:cursor-not-allowed text-white rounded-full transition-all duration-300 hover:scale-105"
+            title={isLoading ? "Loading..." : isPlaying ? "Pause" : isPaused ? "Resume" : "Play"}
           >
-            {isPlaying ? <Pause size={32} /> : <Play size={32} fill="currentColor" />}
+            {isLoading ? (
+              <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : isPlaying ? (
+              <Pause size={32} />
+            ) : (
+              <Play size={32} fill="currentColor" />
+            )}
           </button>
           
           <button

@@ -44,15 +44,7 @@ const ReadPageContent: React.FC = () => {
     }
   }, [scrapedData, router]);
 
-  const { addToQueue, isInQueue, listeningQueue } = useQueue();
-
-  // Debug logging
-  useEffect(() => {
-    console.log('ReadPage Queue Debug:', {
-      queueLength: listeningQueue.length,
-      queue: listeningQueue
-    });
-  }, [listeningQueue]);
+  const { addToQueue, isInQueue } = useQueue();
 
   const handleBack = () => {
     clearAll();
