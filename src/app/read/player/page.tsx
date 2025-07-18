@@ -55,7 +55,14 @@ const MaximizedPlayerContent: React.FC = () => {
     
     const savedSpeed = localStorage.getItem('lexio-selected-speed');
     if (savedSpeed) {
-      setSelectedSpeed(parseFloat(savedSpeed));
+      const speed = parseFloat(savedSpeed);
+      // Validate speed is within ElevenLabs range (0.7 - 1.2)
+      const validSpeed = Math.max(0.7, Math.min(1.2, speed));
+      setSelectedSpeed(validSpeed);
+      // Update localStorage if speed was invalid
+      if (validSpeed !== speed) {
+        localStorage.setItem('lexio-selected-speed', validSpeed.toString());
+      }
     }
   }, []);
 
@@ -244,13 +251,6 @@ const MaximizedPlayerContent: React.FC = () => {
       const shouldUseChunking = textLength > 2000;
       
       console.log(`Generating audio for ${textLength} characters, chunking: ${shouldUseChunking}, streaming: ${useStreaming}`);
-      console.log('TTS Request params:', {
-        textLength: currentItem.content.length,
-        voiceId: selectedVoiceId,
-        speed: selectedSpeed,
-        streaming: useStreaming,
-        chunking: shouldUseChunking && !useStreaming
-      });
       
       const response = await fetch('/api/elevenlabs-tts', {
         method: 'POST',
@@ -267,23 +267,15 @@ const MaximizedPlayerContent: React.FC = () => {
       });
 
       if (!response.ok) {
-        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          console.error('TTS API Error:', errorData);
-          errorMessage = errorData.error || errorData.details || errorMessage;
-        } catch (parseError) {
-          console.error('Failed to parse error response:', parseError);
-          const errorText = await response.text();
-          console.error('Raw error response:', errorText);
-          errorMessage = errorText || errorMessage;
-        }
-        throw new Error(errorMessage);
+        const errorData = await response.json();
+        console.error('TTS API Error:', errorData);
+        throw new Error(errorData.error || `HTTP ${response.status}: Failed to generate audio`);
       }
 
       // Handle streaming response
       if (useStreaming) {
-        const audioUrl = URL.createObjectURL(response.body as any);
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
         return audioUrl;
       }
 

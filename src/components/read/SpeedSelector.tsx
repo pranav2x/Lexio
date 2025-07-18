@@ -17,24 +17,29 @@ interface SpeedSelectorProps {
 
 const SPEED_OPTIONS: SpeedOption[] = [
   {
+    value: 0.7,
+    label: '0.7x',
+    description: 'Slower speed'
+  },
+  {
+    value: 0.85,
+    label: '0.85x',
+    description: 'Slightly slower'
+  },
+  {
     value: 1.0,
     label: '1x',
     description: 'Normal speed'
   },
   {
-    value: 1.25,
-    label: '1.25x',
+    value: 1.1,
+    label: '1.1x',
     description: 'Slightly faster'
   },
   {
-    value: 1.5,
-    label: '1.5x',
+    value: 1.2,
+    label: '1.2x',
     description: 'Faster reading'
-  },
-  {
-    value: 2.0,
-    label: '2x',
-    description: 'Double speed'
   }
 ];
 
