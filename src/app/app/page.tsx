@@ -255,7 +255,7 @@ export default function App() {
                 <button
                   key={example.url}
                   onClick={() => setUrl(example.url)}
-                  className="px-4 py-2 text-sm border border-neutral-200 rounded-lg text-neutral-600 hover:text-black hover:border-neutral-300 hover:shadow-sm transition-all duration-200"
+                  className="px-4 py-2 text-sm border-2 border-gray-400 rounded-lg text-neutral-600 hover:text-black hover:border-black hover:shadow-sm transition-all duration-200 bg-white"
                   disabled={isLoading}
                 >
                   {example.label}

@@ -244,6 +244,13 @@ const MaximizedPlayerContent: React.FC = () => {
       const shouldUseChunking = textLength > 2000;
       
       console.log(`Generating audio for ${textLength} characters, chunking: ${shouldUseChunking}, streaming: ${useStreaming}`);
+      console.log('TTS Request params:', {
+        textLength: currentItem.content.length,
+        voiceId: selectedVoiceId,
+        speed: selectedSpeed,
+        streaming: useStreaming,
+        chunking: shouldUseChunking && !useStreaming
+      });
       
       const response = await fetch('/api/elevenlabs-tts', {
         method: 'POST',
@@ -260,9 +267,18 @@ const MaximizedPlayerContent: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('TTS API Error:', errorData);
-        throw new Error(errorData.error || `HTTP ${response.status}: Failed to generate audio`);
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          console.error('TTS API Error:', errorData);
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch (parseError) {
+          console.error('Failed to parse error response:', parseError);
+          const errorText = await response.text();
+          console.error('Raw error response:', errorText);
+          errorMessage = errorText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
       // Handle streaming response

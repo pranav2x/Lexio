@@ -11,7 +11,21 @@ export async function POST(request: NextRequest) {
     if (!ELEVENLABS_API_KEY) {
       console.error('ElevenLabs API key not found in environment variables');
       return NextResponse.json(
-        { error: 'ElevenLabs API key not configured' },
+        { 
+          error: 'ElevenLabs API key not configured. Please add ELEVENLABS_API_KEY to your .env.local file.',
+          details: 'Missing API key in server environment'
+        },
+        { status: 500 }
+      );
+    }
+
+    if (ELEVENLABS_API_KEY.length < 10) {
+      console.error('ElevenLabs API key appears to be invalid (too short)');
+      return NextResponse.json(
+        { 
+          error: 'ElevenLabs API key appears to be invalid',
+          details: 'API key is too short or malformed'
+        },
         { status: 500 }
       );
     }
@@ -23,12 +37,43 @@ export async function POST(request: NextRequest) {
       voiceId,
       stream,
       useChunking,
-      hasApiKey: !!ELEVENLABS_API_KEY
+      speed,
+      hasApiKey: !!ELEVENLABS_API_KEY,
+      apiKeyLength: ELEVENLABS_API_KEY?.length || 0
     });
 
     if (!text) {
       return NextResponse.json(
         { error: 'Text is required' },
+        { status: 400 }
+      );
+    }
+
+    if (text.length > 50000) {
+      return NextResponse.json(
+        { error: 'Text is too long (max 50,000 characters)' },
+        { status: 400 }
+      );
+    }
+
+    // Validate speed parameter
+    if (speed < 0.25 || speed > 4.0) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid speed parameter',
+          details: 'Speed must be between 0.25 and 4.0'
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate voice ID format
+    if (!voiceId || voiceId.length < 10) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid voice ID',
+          details: 'Voice ID must be a valid ElevenLabs voice identifier'
+        },
         { status: 400 }
       );
     }
@@ -45,25 +90,37 @@ export async function POST(request: NextRequest) {
 
     // Call ElevenLabs API
     console.log('Making request to ElevenLabs API...');
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-      method: 'POST',
-      headers: {
-        'Accept': 'audio/mpeg',
-        'Content-Type': 'application/json',
-        'xi-api-key': ELEVENLABS_API_KEY,
-      },
-      body: JSON.stringify({
-        text,
-        model_id: 'eleven_turbo_v2',
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.0,
-          use_speaker_boost: true,
-          speed: speed
-        }
-      }),
-    });
+    let response;
+    try {
+      response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: 'POST',
+        headers: {
+          'Accept': 'audio/mpeg',
+          'Content-Type': 'application/json',
+          'xi-api-key': ELEVENLABS_API_KEY,
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_turbo_v2',
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.0,
+            use_speaker_boost: true,
+            speed: speed
+          }
+        })
+      });
+    } catch (fetchError) {
+      console.error('Network error calling ElevenLabs API:', fetchError);
+      return NextResponse.json(
+        { 
+          error: 'Network error: Unable to connect to ElevenLabs API',
+          details: 'Please check your internet connection and try again'
+        },
+        { status: 503 }
+      );
+    }
     
     console.log('ElevenLabs API response:', {
       status: response.status,
@@ -72,18 +129,58 @@ export async function POST(request: NextRequest) {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
+      let errorDetails = '';
+      let errorMessage = `ElevenLabs API error: ${response.status} ${response.statusText}`;
+      
+      try {
+        const errorText = await response.text();
+        errorDetails = errorText;
+        
+        // Try to parse as JSON for more detailed error info
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.detail) {
+            errorMessage = errorJson.detail;
+            errorDetails = JSON.stringify(errorJson);
+          }
+        } catch (parseError) {
+          // If not JSON, use the raw text
+          if (errorText) {
+            errorMessage = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
+          }
+        }
+      } catch (readError) {
+        console.error('Failed to read error response:', readError);
+        errorDetails = 'Unable to read error response';
+      }
+
       console.error('ElevenLabs API error:', {
         status: response.status,
         statusText: response.statusText,
-        error: errorText,
+        error: errorDetails,
         voiceId,
-        textLength: text.length
+        speed,
+        textLength: text.length,
+        url: response.url
       });
+
+      // Provide helpful error messages based on status code
+      let helpfulMessage = errorMessage;
+      if (response.status === 400) {
+        helpfulMessage = 'Invalid request parameters. Please check your voice ID and speed settings.';
+      } else if (response.status === 401) {
+        helpfulMessage = 'Invalid API key. Please check your ElevenLabs API key in .env.local';
+      } else if (response.status === 429) {
+        helpfulMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+      } else if (response.status === 500) {
+        helpfulMessage = 'ElevenLabs server error. Please try again later.';
+      }
+
       return NextResponse.json(
         { 
-          error: `ElevenLabs API error: ${response.status} ${response.statusText}`,
-          details: errorText
+          error: helpfulMessage,
+          details: errorDetails,
+          status: response.status
         },
         { status: response.status }
       );
