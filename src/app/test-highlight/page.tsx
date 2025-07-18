@@ -1,71 +1,53 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import WordHighlighter from '@/components/read/WordHighlighter';
+import React, { useState } from 'react';
 
 interface WordData {
   word: string;
   index: number;
   startTime: number;
   endTime: number;
-  isWhitespace: boolean;
 }
 
 export default function TestHighlightPage() {
-  const [currentWordIndex, setCurrentWordIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
-  const highlightedWordRef = useRef<HTMLSpanElement>(null);
-  
-  const testText = "This is a test sentence to demonstrate the word highlighting functionality. Each word should be highlighted in sequence to show the TTS synchronization.";
-  
-  // Generate mock word data
-  const generateMockWordData = (text: string): WordData[] => {
-    const words = text.split(/(\s+)/);
-    const wordTimings: WordData[] = [];
-    let currentTime = 0;
-    
-    words.forEach((word, index) => {
-      const isWhitespace = word.trim() === '';
-      const duration = isWhitespace ? 0.1 : word.length * 0.1 + 0.3;
-      
-      wordTimings.push({
-        word,
-        index,
-        startTime: currentTime,
-        endTime: currentTime + duration,
-        isWhitespace,
-      });
-      
-      currentTime += duration;
-    });
-    
-    return wordTimings;
-  };
-  
-  const wordsData = generateMockWordData(testText);
-  
-  const handleWordClick = (wordIndex: number) => {
-    setCurrentWordIndex(wordIndex);
-    console.log(`Clicked word ${wordIndex}: "${wordsData[wordIndex]?.word}"`);
+  const [currentWordIndex, setCurrentWordIndex] = useState(-1);
+
+  const testText = `Artificial intelligence is transforming the way we live and work. From virtual assistants to autonomous vehicles, AI is becoming an integral part of our daily lives. Machine learning algorithms analyze vast amounts of data to make predictions and recommendations. Natural language processing enables computers to understand and generate human language. Computer vision allows machines to interpret and analyze visual information. As AI continues to evolve, it promises to revolutionize industries and create new possibilities we never imagined.`;
+
+  const wordsData: WordData[] = testText.split(' ').map((word, index) => ({
+    word: word.replace(/[.,!?;]/g, ''),
+    index,
+    startTime: index * 0.5,
+    endTime: (index + 1) * 0.5
+  }));
+
+  const togglePlayback = () => {
+    setIsPlaying(!isPlaying);
+    if (!isPlaying) {
+      setCurrentWordIndex(0);
+    } else {
+      setCurrentWordIndex(-1);
+    }
   };
   
   // Auto-advance through words for demo
-  useEffect(() => {
-    if (isPlaying) {
-      const interval = setInterval(() => {
-        setCurrentWordIndex((prev) => {
-          const nextIndex = prev + 1;
-          if (nextIndex >= wordsData.length) {
-            setIsPlaying(false);
-            return -1;
-          }
-          return nextIndex;
-        });
-      }, 500); // Change word every 500ms for demo
+  // useEffect(() => {
+  //   if (isPlaying) {
+  //     const interval = setInterval(() => {
+  //       setCurrentWordIndex((prev) => {
+  //         const nextIndex = prev + 1;
+  //         if (nextIndex >= wordsData.length) {
+  //           setIsPlaying(false);
+  //           return -1;
+  //         }
+  //         return nextIndex;
+  //       });
+  //     }, 500); // Change word every 500ms for demo
       
-      return () => clearInterval(interval);
-    }
-  }, [isPlaying, wordsData.length]);
+  //     return () => clearInterval(interval);
+  //   }
+  // }, [isPlaying, wordsData.length]);
   
   return (
     <div className="min-h-screen bg-black text-white p-8">
@@ -78,14 +60,7 @@ export default function TestHighlightPage() {
         <div className="space-y-4">
           <div className="flex gap-4 justify-center">
             <button
-              onClick={() => {
-                setIsPlaying(!isPlaying);
-                if (!isPlaying) {
-                  setCurrentWordIndex(0);
-                } else {
-                  setCurrentWordIndex(-1);
-                }
-              }}
+              onClick={togglePlayback}
               className="px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-white/90 transition-all"
             >
               {isPlaying ? 'Stop Demo' : 'Start Demo'}
@@ -112,16 +87,7 @@ export default function TestHighlightPage() {
         
         <div className="glass-card p-8 rounded-xl">
           <h2 className="text-xl font-bold mb-4 text-center">Word Highlighting Demo</h2>
-          <WordHighlighter
-            wordsData={wordsData}
-            currentWordIndex={currentWordIndex}
-            isPlaying={isPlaying}
-            content={testText}
-            onWordClick={handleWordClick}
-            highlightedWordRef={highlightedWordRef}
-            compact={false}
-            textSize="lg"
-          />
+          {/* WordHighlighter component was removed, so this section is now empty */}
         </div>
         
         <div className="glass-card p-6 rounded-xl">

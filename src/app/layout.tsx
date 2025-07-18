@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { DarkModeToggle } from "@/components/DarkModeToggle";
+import { QueueProviderWrapper } from "@/components/QueueProviderWrapper";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,12 +35,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background text-foreground`}
       >
-        {/* Dark Mode Toggle - Fixed Position */}
-        <div className="fixed top-4 right-4 z-50">
-          <DarkModeToggle />
-        </div>
-        
-        {children}
+        <QueueProviderWrapper>
+          {children}
+        </QueueProviderWrapper>
       </body>
     </html>
   );

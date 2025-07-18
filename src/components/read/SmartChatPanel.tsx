@@ -9,10 +9,9 @@ interface AvailableSection {
 }
 
 interface SmartChatPanelProps {
-  availableSections: AvailableSection[];
-  onAddToQueue: (sectionIndices: number[], explanation: string) => void;
+  availableSections: Array<{ title: string; content: string; index: number }>;
+  onAddToQueue: (sectionIndices: number[]) => void;
   onAddSummary: () => void;
-  isProcessing: boolean;
 }
 
 interface ChatMessage {
@@ -183,8 +182,7 @@ function findRelevantSections(availableSections: AvailableSection[], query: stri
 const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
   availableSections,
   onAddToQueue,
-  onAddSummary,
-  isProcessing
+  onAddSummary
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -235,13 +233,13 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
       
       if (isLearningRequest) {
         // This is a learning request - automatically find and add relevant sections
-        const { sections: relevantSections, topics, explanation } = findRelevantSections(availableSections, userMessage);
+        const { sections: relevantSections, topics } = findRelevantSections(availableSections, userMessage);
         
         if (relevantSections.length > 0) {
           const sectionIndices = relevantSections.map(s => s.index);
           
           // Automatically add sections to queue
-          onAddToQueue(sectionIndices, explanation);
+          onAddToQueue(sectionIndices);
           
           // Send confirmation message
           const sectionTitles = relevantSections.map(s => `"${s.title}"`).join(', ');
@@ -309,7 +307,7 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
           addMessage('assistant', responses[Math.floor(Math.random() * responses.length)]);
         }
       }
-    } catch (error) {
+    } catch {
       addMessage('assistant', "Sorry, I encountered an error. Please try asking again!");
     } finally {
       setIsLoading(false);
@@ -327,7 +325,7 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
     if (!message.actions) return;
 
     if (message.actions.type === 'add_sections' && message.actions.sectionIndices) {
-      onAddToQueue(message.actions.sectionIndices, message.actions.explanation || 'AI recommendation');
+      onAddToQueue(message.actions.sectionIndices);
     } else if (message.actions.type === 'add_summary') {
       onAddSummary();
     }

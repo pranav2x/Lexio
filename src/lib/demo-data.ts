@@ -1,9 +1,13 @@
 // This file contains pre-fetched, hardcoded data to ensure a flawless demo.
 // Uses lazy decoding to prevent startup crashes with placeholder data.
 
-import { WordTiming } from './tts';
-
 // --- DATA STRUCTURES ---
+export interface WordTiming {
+  word: string;
+  start: number;
+  end: number;
+}
+
 export interface DemoAudioData {
   audioBlob: Blob;
   wordTimings: WordTiming[];
