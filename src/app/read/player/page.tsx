@@ -116,7 +116,8 @@ const MaximizedPlayerContent: React.FC = () => {
     if (!currentItem) return [];
     
     const baseWPM = 160;
-    const adjustedWPM = baseWPM * 1; // speed is always 1 for now
+    // Apply speed multiplier to WPM calculations
+    const adjustedWPM = baseWPM * selectedSpeed;
     const charsPerSecond = (adjustedWPM * 5) / 60;
     
     let currentTime = 0;
@@ -144,12 +145,17 @@ const MaximizedPlayerContent: React.FC = () => {
     if (wordTimings.length > 0 && isPlaying && !isPaused) {
       const now = Date.now();
       const elapsedTime = (now - actualStartTimeRef.current) / 1000;
-      const adjustedTime = elapsedTime + timeOffset;
+      
+      // Apply speed-based timing adjustment for better synchronization
+      const speedAdjustment = selectedSpeed > 1 ? (selectedSpeed - 1) * 0.3 : 0;
+      const adjustedTime = elapsedTime + timeOffset + speedAdjustment;
       
       setCurrentTime(adjustedTime);
       
+      // Use slightly tighter timing windows for higher speeds
+      const timingTolerance = selectedSpeed > 1 ? 0.05 : 0.1;
       const currentWordIdx = wordTimings.findIndex(timing => 
-        adjustedTime >= (timing.start - 0.1) && adjustedTime < (timing.end + 0.1)
+        adjustedTime >= (timing.start - timingTolerance) && adjustedTime < (timing.end + timingTolerance)
       );
       
       if (currentWordIdx !== -1 && currentWordIdx !== currentWordIndex) {

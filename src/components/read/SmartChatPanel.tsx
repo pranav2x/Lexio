@@ -269,17 +269,16 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
       } else if (lowerInput.includes('recommend') || lowerInput.includes('suggest') || lowerInput.includes('what should')) {
         if (availableSections.length > 2) {
           const recommendedIndices = availableSections.slice(0, 2).map(s => s.index);
-          addMessage('assistant', `I recommend starting with these two key sections: "${availableSections[0].title}" and "${availableSections[1].title}". They provide good foundational knowledge.`, {
-            type: 'add_sections',
-            sectionIndices: recommendedIndices,
-            explanation: 'Recommended foundational sections'
-          });
+          
+          // Automatically add sections to queue
+          onAddToQueue(recommendedIndices);
+          
+          addMessage('assistant', `Perfect! I've automatically added these two key sections to your queue: "${availableSections[0].title}" and "${availableSections[1].title}". They provide good foundational knowledge and you can start listening right away!`);
         } else if (availableSections.length > 0) {
-          addMessage('assistant', `I suggest adding "${availableSections[0].title}" - it's one of the key sections available right now.`, {
-            type: 'add_sections',
-            sectionIndices: [availableSections[0].index],
-            explanation: 'Key recommended section'
-          });
+          // Automatically add the single section to queue
+          onAddToQueue([availableSections[0].index]);
+          
+          addMessage('assistant', `Great! I've automatically added "${availableSections[0].title}" to your queue - it's one of the key sections available right now. You can start listening immediately!`);
         } else {
           addMessage('assistant', "It looks like most sections are already in your queue! Would you like me to suggest the summary?", {
             type: 'add_summary'

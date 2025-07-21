@@ -137,10 +137,7 @@ const ReadPageContent: React.FC = () => {
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   <span>~{Math.ceil(scrapedData.text.split(' ').length / 200)}m read</span>
                 </div>
-                <div className="flex items-center gap-2 bg-white/8 px-3 py-1.5 rounded-lg border border-white/10">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 14.142M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
-                  <span>Web Speech API</span>
-                </div>
+
               </div>
             </div>
           </div>
@@ -177,7 +174,7 @@ const ReadPageContent: React.FC = () => {
                               index={index}
                               isAnimating={isAnimating}
                               hasAnimated={hasAnimated}
-                              onClick={() => handleAddSectionToQueue(index)}
+                              
                             />
                           );
                         })}
@@ -191,7 +188,7 @@ const ReadPageContent: React.FC = () => {
                             index={scrapedData.sections.length}
                             isAnimating={isAnimating}
                             hasAnimated={hasAnimated}
-                            onClick={handleAddSummaryToQueue}
+                        
                           />
                         )}
                       </div>
