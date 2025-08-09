@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const DEFAULT_VOICE_ID = '4tRn1lSkEn13EVTuqb0g'; // User specified voice ID
-const FALLBACK_VOICE_ID = 'JBFqnCBsd6RMkjVDRZzb'; // Known working voice ID (George)
 
 export async function POST(request: NextRequest) {
   try {

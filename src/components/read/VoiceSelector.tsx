@@ -53,8 +53,6 @@ export function VoiceSelector({ selectedVoiceId, onVoiceChange, selectedSpeed = 
     }
   };
 
-  const selectedVoice = voices.find(voice => voice.voice_id === selectedVoiceId);
-
   const handleVoiceSelect = (voiceId: string) => {
     onVoiceChange(voiceId);
     setIsOpen(false);

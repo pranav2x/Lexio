@@ -2,6 +2,14 @@ import { NextResponse } from 'next/server';
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
+// Add interface at the top after imports
+interface ElevenLabsVoice {
+  voice_id: string;
+  name: string;
+  category?: string;
+  preview_url?: string;
+}
+
 // Popular default voices with their characteristics
 const POPULAR_VOICES = [
   {
@@ -104,13 +112,13 @@ export async function GET() {
       if (response.ok) {
         const data = await response.json();
         // Filter for public/premade voices and add popular ones
-        const publicVoices = data.voices?.filter((voice: any) => 
+        const publicVoices = data.voices?.filter((voice: ElevenLabsVoice) => 
           voice.category === 'premade' || POPULAR_VOICES.some(pv => pv.voice_id === voice.voice_id)
         ) || [];
 
         // Merge with our popular voices list, prioritizing API data
         const mergedVoices = POPULAR_VOICES.map(popularVoice => {
-          const apiVoice = publicVoices.find((v: any) => v.voice_id === popularVoice.voice_id);
+          const apiVoice = publicVoices.find((v: ElevenLabsVoice) => v.voice_id === popularVoice.voice_id);
           return apiVoice ? {
             voice_id: apiVoice.voice_id,
             name: apiVoice.name,

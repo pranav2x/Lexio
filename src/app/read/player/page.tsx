@@ -17,15 +17,15 @@ const MaximizedPlayerContent: React.FC = () => {
     currentQueueIndex, 
     handleControlsNext, 
     handleControlsPrevious, 
-    removeFromQueue,
+    // removeFromQueue,
     setCurrentQueueIndex,
-    setIsQueuePlaying
+    // setIsQueuePlaying
   } = useQueue();
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [currentProgress, setCurrentProgress] = useState(0);
+  // const [currentProgress, setCurrentProgress] = useState(0);
   const [volume, setVolume] = useState(1);
   const [currentWordIndex, setCurrentWordIndex] = useState(-1);
   const [currentTime, setCurrentTime] = useState(0);
@@ -357,7 +357,7 @@ const MaximizedPlayerContent: React.FC = () => {
     
     try {
       // Generate word timings first
-      const timings = generateWordTimings();
+      generateWordTimings();
       
       // Get or generate audio with streaming for faster perceived performance
       let audioUrl = audioUrlRef.current;

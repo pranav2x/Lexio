@@ -21,6 +21,12 @@ interface SmartChatProps {
   isProcessing?: boolean;
 }
 
+interface KeywordData {
+  primary?: string[];
+  secondary?: string[];
+  context?: string[];
+}
+
 // Local analysis function (replaces the deleted API)
 function analyzeMessageLocally(userMessage: string, availableSections: Array<{title: string, content: string, index: number}>): {
   response: string;
@@ -103,7 +109,7 @@ function analyzeMessageLocally(userMessage: string, availableSections: Array<{ti
   const getContextualRelevance = (userMessage: string, sectionText: string): number => {
     let relevanceScore = 0;
     const userWords = userMessage.toLowerCase().split(/\s+/).filter(word => word.length > 3);
-    const sectionWords = sectionText.toLowerCase().split(/\s+/);
+    // const sectionWords = sectionText.toLowerCase().split(/\s+/);
     
     // Check for phrase-level matches (higher weight)
     const userPhrases = [];
@@ -150,7 +156,7 @@ function analyzeMessageLocally(userMessage: string, availableSections: Array<{ti
     Object.entries(keywordMappings).forEach(([category, keywords]) => {
       if (category === 'everything' || category === 'summary') return;
       
-      const keywordData = keywords as any;
+      const keywordData = keywords as KeywordData;
       if (typeof keywordData === 'object' && keywordData.primary) {
         // Check primary keywords (highest weight)
         const userHasPrimary = keywordData.primary.some((keyword: string) => message.includes(keyword));
@@ -161,18 +167,18 @@ function analyzeMessageLocally(userMessage: string, availableSections: Array<{ti
         }
         
         // Check secondary keywords (medium weight)
-        const userHasSecondary = keywordData.secondary.some((keyword: string) => message.includes(keyword));
-        const sectionHasSecondary = keywordData.secondary.some((keyword: string) => sectionText.includes(keyword));
+        const userHasSecondary = keywordData.secondary?.some((keyword: string) => message.includes(keyword));
+        const sectionHasSecondary = keywordData.secondary?.some((keyword: string) => sectionText.includes(keyword));
         
         if (userHasSecondary && sectionHasSecondary) {
           score += 15; // Medium score for secondary matches
         }
         
-        // Check context keywords (bonus if both primary/secondary and context match)
+        // Check context keywords (lower weight but good for overall relevance)
+        const userHasContext = keywordData.context?.some((keyword: string) => message.includes(keyword));
+        const sectionHasContext = keywordData.context?.some((keyword: string) => sectionText.includes(keyword));
+        
         if ((userHasPrimary || userHasSecondary) && (sectionHasPrimary || sectionHasSecondary)) {
-          const userHasContext = keywordData.context.some((keyword: string) => message.includes(keyword));
-          const sectionHasContext = keywordData.context.some((keyword: string) => sectionText.includes(keyword));
-          
           if (userHasContext && sectionHasContext) {
             score += 10; // Bonus for contextual relevance
           }

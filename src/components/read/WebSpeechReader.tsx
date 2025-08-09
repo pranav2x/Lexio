@@ -103,7 +103,7 @@ const WebSpeechReader: React.FC<WebSpeechReaderProps> = ({
     try {
       speechSynthesis.cancel();
       
-      const timings = generateWordTimings();
+      generateWordTimings();
       
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = speed;
@@ -219,7 +219,6 @@ const WebSpeechReader: React.FC<WebSpeechReaderProps> = ({
           utterance.onstart = () => {
             const now = Date.now();
             // Calculate the offset time so timing continues from where we paused
-            const timeSincePause = (now - pausedTimeRef.current) / 1000;
             actualStartTimeRef.current = now - (currentTimeInSeconds * 1000);
             startTimeRef.current = actualStartTimeRef.current;
             setIsPlaying(true);
