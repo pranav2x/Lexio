@@ -35,6 +35,7 @@ A modern web application built with Next.js 15, TypeScript, and Tailwind CSS, fe
 - npm or yarn
 - Firecrawl API key (get one from [https://firecrawl.dev/](https://firecrawl.dev/))
 - ElevenLabs API key (get one from [https://elevenlabs.io/](https://elevenlabs.io/))
+- OpenAI API key (get one from [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys))
 
 ### Installation
 
@@ -46,15 +47,16 @@ A modern web application built with Next.js 15, TypeScript, and Tailwind CSS, fe
 
 3. Set up environment variables:
    ```bash
-   # Create a .env.local file in the project root
-   echo "FIRECRAWL_API_KEY=your_firecrawl_api_key_here" > .env.local
-   echo "ELEVENLABS_API_KEY=your_elevenlabs_api_key_here" >> .env.local
+   # Copy the example file and edit it
+   cp .env.example .env.local
+   # Then edit .env.local with your actual API keys
    ```
 
    Or manually create `.env.local` with:
    ```env
    FIRECRAWL_API_KEY=your_firecrawl_api_key_here
    ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+   OPENAI_API_KEY=your_openai_api_key_here
    ```
 
    **Security Note:** Both API keys (without `NEXT_PUBLIC_` prefix) are kept secure on the server and never exposed to the browser. All TTS functionality is handled server-side for security.
@@ -82,6 +84,18 @@ npm run build
 ```bash
 npm start
 ```
+
+## 🚀 Vercel Deployment
+
+When deploying to Vercel, make sure to add the following environment variables in your Vercel project settings:
+
+1. Go to your Vercel dashboard → Your Project → Settings → Environment Variables
+2. Add these variables for **Production**, **Preview**, and **Development** environments:
+   - `FIRECRAWL_API_KEY` - Your Firecrawl API key from [https://firecrawl.dev/](https://firecrawl.dev/)
+   - `ELEVENLABS_API_KEY` - Your ElevenLabs API key from [https://elevenlabs.io/](https://elevenlabs.io/)
+   - `OPENAI_API_KEY` - Your OpenAI API key from [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+
+**Note**: These API keys are server-side only and will never be exposed to the browser for security.
 
 ## 🌐 Using the Application
 
@@ -138,11 +152,14 @@ FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 
 # Required for text-to-speech functionality (server-side only, secure)
 ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+
+# Required for smart chat functionality (server-side only, secure)
+OPENAI_API_KEY=your_openai_api_key_here
 ```
 
 **Important Security Note:**
-- Both `FIRECRAWL_API_KEY` and `ELEVENLABS_API_KEY` are server-side only and never exposed to the browser
-- All TTS functionality is handled securely through server-side API routes
+- All API keys (`FIRECRAWL_API_KEY`, `ELEVENLABS_API_KEY`, and `OPENAI_API_KEY`) are server-side only and never exposed to the browser
+- All TTS and chat functionality is handled securely through server-side API routes
 
 ## 🎨 Customization
 

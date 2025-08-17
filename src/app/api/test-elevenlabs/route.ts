@@ -9,7 +9,7 @@ export async function GET() {
     if (!ELEVENLABS_API_KEY) {
       return NextResponse.json({
         status: 'error',
-        message: 'ElevenLabs API key not configured',
+        message: 'ELEVENLABS_API_KEY environment variable is required',
         hasApiKey: false
       });
     }

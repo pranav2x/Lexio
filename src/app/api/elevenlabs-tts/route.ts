@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     if (!ELEVENLABS_API_KEY) {
       console.error('ElevenLabs API key not found in environment variables');
       return NextResponse.json(
-        { error: 'ElevenLabs API key not configured' },
+        { error: 'ELEVENLABS_API_KEY environment variable is required' },
         { status: 500 }
       );
     }

@@ -57,6 +57,63 @@ function extractLearningTopics(query: string): string[] {
 }
 
 /**
+ * Generate dynamic suggestions based on available content
+ */
+function generateContentBasedSuggestions(availableSections: AvailableSection[]): string[] {
+  if (availableSections.length === 0) {
+    return ['Recommend something', 'Show summary', 'Add everything'];
+  }
+
+  const suggestions = ['Recommend something', 'Show summary', 'Add everything'];
+  
+  // Extract key topics from section titles and content
+  const allText = availableSections.map(section => 
+    `${section.title} ${section.content}`
+  ).join(' ').toLowerCase();
+  
+  // Common academic/learning topics to look for
+  const topicPatterns = [
+    { keywords: ['action', 'reasoning', 'model', 'ai', 'artificial intelligence'], suggestion: 'I want to learn about AI models' },
+    { keywords: ['robot', 'robotics', 'embodiment', 'manipulation'], suggestion: 'I want to learn about robotics' },
+    { keywords: ['vision', 'language', 'multimodal', 'perception'], suggestion: 'I want to learn about vision-language models' },
+    { keywords: ['3d', 'space', 'spatial', 'geometry', 'depth'], suggestion: 'I want to learn about spatial reasoning' },
+    { keywords: ['training', 'dataset', 'performance', 'evaluation'], suggestion: 'I want to learn about model training' },
+    { keywords: ['open source', 'open model', 'research'], suggestion: 'I want to learn about open research' },
+    { keywords: ['trade', 'network', 'trading', 'commerce', 'economic'], suggestion: 'I want to learn about trade networks' },
+    { keywords: ['mongol', 'empire', 'expansion', 'conquest'], suggestion: 'I want to learn about Mongol Empire' },
+    { keywords: ['islamic', 'islam', 'muslim', 'caliphate'], suggestion: 'I want to learn about Islamic expansion' },
+    { keywords: ['technology', 'innovation', 'invention', 'technical'], suggestion: 'I want to learn about technology innovations' },
+    { keywords: ['disease', 'plague', 'black death', 'pandemic'], suggestion: 'I want to learn about disease impact' },
+    { keywords: ['climate', 'environment', 'environmental'], suggestion: 'I want to learn about environmental factors' },
+    { keywords: ['culture', 'cultural', 'exchange', 'diffusion'], suggestion: 'I want to learn about cultural exchange' },
+    { keywords: ['political', 'politics', 'government', 'power'], suggestion: 'I want to learn about political systems' },
+    { keywords: ['social', 'society', 'class', 'hierarchy'], suggestion: 'I want to learn about social structures' },
+    { keywords: ['military', 'warfare', 'conflict', 'battle'], suggestion: 'I want to learn about military history' }
+  ];
+  
+  // Find matching topics based on keyword density
+  const matchedTopics = topicPatterns
+    .map(pattern => ({
+      ...pattern,
+      score: pattern.keywords.reduce((score, keyword) => {
+        const matches = (allText.match(new RegExp(keyword, 'g')) || []).length;
+        return score + matches;
+      }, 0)
+    }))
+    .filter(topic => topic.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2); // Take top 2 matched topics
+  
+  // Add the matched suggestions to the beginning
+  matchedTopics.forEach(topic => {
+    suggestions.unshift(topic.suggestion);
+  });
+  
+  // Keep only unique suggestions and limit to 4 total
+  return [...new Set(suggestions)].slice(0, 4);
+}
+
+/**
  * Calculate relevance score for a section based on extracted topics
  * Now requires substantial content alignment, not just keyword mentions
  */
@@ -188,7 +245,7 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
     {
       id: '1',
       type: 'assistant',
-      content: "Hi! I'm your smart assistant. I can help you build your listening queue by analyzing your learning interests. Just tell me what you want to learn about, and I'll automatically find and add relevant sections to your queue!",
+      content: "Hi! I'm your smart assistant powered by ChatGPT. I can help you build your listening queue by intelligently analyzing your learning interests. Just tell me what you want to learn about, and I'll automatically find and add relevant sections to your queue!",
       timestamp: new Date(),
     }
   ]);
@@ -215,9 +272,69 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
     setIsLoading(true);
 
     try {
-      // Simulate processing time
-      await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 1200));
+      // Call OpenAI API for intelligent response
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userMessage,
+          availableSections: availableSections.map(section => ({
+            title: section.title,
+            content: section.content.substring(0, 300),
+            index: section.index
+          })),
+          context: 'User is browsing content and wants to build a listening queue'
+        }),
+      });
 
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      let aiResponse = data.response;
+
+      // Parse AI response to extract recommended sections
+      const recommendedSections: number[] = [];
+      const sectionPattern = /(?:section\s+)?(\d+)/gi;
+      const matches = aiResponse.match(sectionPattern);
+      
+      if (matches) {
+        for (const match of matches) {
+          const sectionNum = parseInt(match.replace(/\D/g, ''));
+          if (sectionNum > 0 && sectionNum <= availableSections.length) {
+            const sectionIndex = availableSections[sectionNum - 1].index;
+            if (!recommendedSections.includes(sectionIndex)) {
+              recommendedSections.push(sectionIndex);
+            }
+          }
+        }
+      }
+
+      // If AI recommended specific sections, auto-add them
+      if (recommendedSections.length > 0) {
+        onAddToQueue(recommendedSections);
+        const sectionTitles = recommendedSections.map(idx => 
+          availableSections.find(s => s.index === idx)?.title
+        ).filter(Boolean);
+        
+        aiResponse += `\n\n✅ I've automatically added ${recommendedSections.length} section${recommendedSections.length > 1 ? 's' : ''} to your queue: ${sectionTitles.join(', ')}`;
+      }
+
+      // Check for summary request
+      if (aiResponse.toLowerCase().includes('summary') || userMessage.toLowerCase().includes('summary')) {
+        onAddSummary();
+        aiResponse += '\n\n✅ Summary added to your queue!';
+      }
+
+      addMessage('assistant', aiResponse);
+
+    } catch (error) {
+      console.error('OpenAI API error, falling back to local analysis:', error);
+      
+      // Fallback to the original hardcoded logic
       const lowerInput = userMessage.toLowerCase();
       
       // Check if this is a learning request
@@ -306,8 +423,6 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
           addMessage('assistant', responses[Math.floor(Math.random() * responses.length)]);
         }
       }
-    } catch {
-      addMessage('assistant', "Sorry, I encountered an error. Please try asking again!");
     } finally {
       setIsLoading(false);
     }
@@ -418,7 +533,7 @@ const SmartChatPanel: React.FC<SmartChatPanelProps> = ({
         
         {/* Quick suggestions */}
         <div className="mt-2 flex flex-wrap gap-2">
-          {['I want to learn about trade networks', 'Recommend something', 'Show summary', 'Add everything'].map((suggestion) => (
+          {generateContentBasedSuggestions(availableSections).map((suggestion) => (
             <button
               key={suggestion}
               onClick={() => setInputValue(suggestion)}

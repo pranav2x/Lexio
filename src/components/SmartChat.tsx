@@ -27,7 +27,89 @@ interface KeywordData {
   context?: string[];
 }
 
-// Local analysis function (replaces the deleted API)
+// OpenAI analysis function
+async function analyzeMessageWithOpenAI(userMessage: string, availableSections: Array<{title: string, content: string, index: number}>): Promise<{
+  response: string;
+  matchedSections: number[];
+  addedSectionTitles: string[];
+  includeSummary: boolean;
+  explanation: string;
+}> {
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: userMessage,
+        availableSections: availableSections.map(section => ({
+          title: section.title,
+          content: section.content.substring(0, 300), // Limit content length for API
+          index: section.index
+        })),
+        context: 'User is browsing content and wants to build a listening queue'
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const aiResponse = data.response;
+
+    // Parse AI response to extract recommended sections
+    const matchedSections: number[] = [];
+    const addedSectionTitles: string[] = [];
+    let includeSummary = false;
+
+    // Look for section references in the AI response
+    const sectionPattern = /(?:section\s+)?(\d+)/gi;
+    const matches = aiResponse.match(sectionPattern);
+    
+    if (matches) {
+      for (const match of matches) {
+        const sectionNum = parseInt(match.replace(/\D/g, ''));
+        if (sectionNum > 0 && sectionNum <= availableSections.length) {
+          const sectionIndex = availableSections[sectionNum - 1].index;
+          if (!matchedSections.includes(sectionIndex)) {
+            matchedSections.push(sectionIndex);
+            addedSectionTitles.push(availableSections[sectionNum - 1].title);
+          }
+        }
+      }
+    }
+
+    // Check for summary request
+    if (aiResponse.toLowerCase().includes('summary') || userMessage.toLowerCase().includes('summary')) {
+      includeSummary = true;
+    }
+
+    // Fallback keyword matching if AI didn't provide specific recommendations
+    if (matchedSections.length === 0) {
+      const fallbackAnalysis = analyzeMessageLocally(userMessage, availableSections);
+      matchedSections.push(...fallbackAnalysis.matchedSections);
+      addedSectionTitles.push(...fallbackAnalysis.addedSectionTitles);
+      includeSummary = fallbackAnalysis.includeSummary;
+    }
+
+    return {
+      response: aiResponse,
+      matchedSections,
+      addedSectionTitles,
+      includeSummary,
+      explanation: 'AI-powered analysis with ChatGPT'
+    };
+
+  } catch (error) {
+    console.error('OpenAI API error:', error);
+    // Fallback to local analysis if API fails
+    return analyzeMessageLocally(userMessage, availableSections);
+  }
+}
+
+// Local analysis function (fallback for when OpenAI API fails)
 function analyzeMessageLocally(userMessage: string, availableSections: Array<{title: string, content: string, index: number}>): {
   response: string;
   matchedSections: number[];
@@ -281,7 +363,7 @@ export default function SmartChat({
     {
       id: '1',
       type: 'system',
-      content: "Hi! I'm your Lexio AI learning assistant. Tell me what you'd like to learn about and I'll add the most relevant content to your queue. Try saying something like 'I want to learn about trade networks' or 'teach me about the Mongol Empire'.",
+      content: "Hi! I'm your Lexio AI learning assistant powered by ChatGPT. Tell me what you'd like to learn about and I'll intelligently find and add the most relevant content to your queue. Try saying something like 'I want to learn about trade networks' or 'teach me about the Mongol Empire'.",
       timestamp: new Date(),
     }
   ]);
@@ -328,8 +410,8 @@ export default function SmartChat({
       // Single concise processing message
       await addSystemMessage("🔍 Analyzing request and searching content...");
 
-      // Use local analysis instead of API call
-      const analysis = analyzeMessageLocally(userMessage.content, availableSections);
+      // Use OpenAI analysis with fallback to local analysis
+      const analysis = await analyzeMessageWithOpenAI(userMessage.content, availableSections);
 
       if (analysis.matchedSections.length > 0) {
         // Show simple result and add to queue
@@ -373,14 +455,62 @@ export default function SmartChat({
     setInputValue(suggestion);
   };
 
-  const suggestions = [
-    "Trade networks",
-    "Mongol Empire", 
-    "Islamic expansion",
-    "Black Death",
-    "Technology innovations",
-    "Everything"
-  ];
+  // Generate dynamic suggestions based on available content
+  function generateContentBasedSuggestions(availableSections: Array<{title: string, content: string, index: number}>): string[] {
+    if (availableSections.length === 0) {
+      return ['Recommend something', 'Show summary', 'Everything'];
+    }
+
+    const suggestions = ['Recommend something', 'Show summary', 'Everything'];
+    
+    // Extract key topics from section titles and content
+    const allText = availableSections.map(section => 
+      `${section.title} ${section.content}`
+    ).join(' ').toLowerCase();
+    
+    // Common academic/learning topics to look for
+    const topicPatterns = [
+      { keywords: ['action', 'reasoning', 'model', 'ai', 'artificial intelligence'], suggestion: 'AI models' },
+      { keywords: ['robot', 'robotics', 'embodiment', 'manipulation'], suggestion: 'Robotics' },
+      { keywords: ['vision', 'language', 'multimodal', 'perception'], suggestion: 'Vision-language models' },
+      { keywords: ['3d', 'space', 'spatial', 'geometry', 'depth'], suggestion: 'Spatial reasoning' },
+      { keywords: ['training', 'dataset', 'performance', 'evaluation'], suggestion: 'Model training' },
+      { keywords: ['open source', 'open model', 'research'], suggestion: 'Open research' },
+      { keywords: ['trade', 'network', 'trading', 'commerce', 'economic'], suggestion: 'Trade networks' },
+      { keywords: ['mongol', 'empire', 'expansion', 'conquest'], suggestion: 'Mongol Empire' },
+      { keywords: ['islamic', 'islam', 'muslim', 'caliphate'], suggestion: 'Islamic expansion' },
+      { keywords: ['technology', 'innovation', 'invention', 'technical'], suggestion: 'Technology innovations' },
+      { keywords: ['disease', 'plague', 'black death', 'pandemic'], suggestion: 'Disease impact' },
+      { keywords: ['climate', 'environment', 'environmental'], suggestion: 'Environmental factors' },
+      { keywords: ['culture', 'cultural', 'exchange', 'diffusion'], suggestion: 'Cultural exchange' },
+      { keywords: ['political', 'politics', 'government', 'power'], suggestion: 'Political systems' },
+      { keywords: ['social', 'society', 'class', 'hierarchy'], suggestion: 'Social structures' },
+      { keywords: ['military', 'warfare', 'conflict', 'battle'], suggestion: 'Military history' }
+    ];
+    
+    // Find matching topics based on keyword density
+    const matchedTopics = topicPatterns
+      .map(pattern => ({
+        ...pattern,
+        score: pattern.keywords.reduce((score, keyword) => {
+          const matches = (allText.match(new RegExp(keyword, 'g')) || []).length;
+          return score + matches;
+        }, 0)
+      }))
+      .filter(topic => topic.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3); // Take top 3 matched topics
+    
+    // Add the matched suggestions to the beginning
+    matchedTopics.forEach(topic => {
+      suggestions.unshift(topic.suggestion);
+    });
+    
+    // Keep only unique suggestions and limit to 6 total
+    return [...new Set(suggestions)].slice(0, 6);
+  }
+
+  const suggestions = generateContentBasedSuggestions(availableSections);
 
   return (
     <div className="bg-neutral-900 border border-neutral-700 rounded-xl p-6 h-full flex flex-col">
